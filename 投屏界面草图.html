@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Android → Windows 投屏 · 交互草图</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f5f3;color:#222;font:15px/1.6 "Microsoft YaHei",system-ui,sans-serif}main{max-width:1240px;margin:auto;padding:32px}h1{font-size:27px;font-weight:600;margin:0 0 4px}h2{font-size:17px;margin:0 0 16px}p{margin:0 0 14px}.intro{color:#666}.layout{display:grid;grid-template-columns:285px 1fr;gap:24px;margin-top:25px}.panel{border:1px solid #aaa;background:white;padding:22px;border-radius:3px}.label{font-size:12px;color:#666;letter-spacing:1px}.device{border:1px solid #aaa;padding:14px;margin:12px 0 20px}.row{display:flex;align-items:center;justify-content:space-between;gap:12px}.tag{border:1px solid #999;font-size:12px;padding:2px 7px;white-space:nowrap}button,input,select{font:inherit}button{background:white;border:1px solid #888;padding:7px 12px;border-radius:3px;color:#222;cursor:pointer}button:hover{background:#eee}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #333;outline-offset:3px}.primary{background:#333;color:white}.primary:hover{background:#555}button:disabled{opacity:.4;cursor:default}.wide{width:100%}select{width:100%;padding:7px;border:1px solid #aaa;background:white;margin:7px 0 18px}.aside-note{font-size:13px;color:#666;margin:20px 0 0}.scene{position:relative;height:545px;border:1px solid #999;overflow:hidden;background:#e9e9e7}.desktop{position:absolute;inset:0;padding:22px}.desktop-window{border:1px solid #aaa;background:#fafaf9;width:70%;height:360px;margin:48px 0 0 8px}.desktop-title{border-bottom:1px solid #bbb;padding:8px 14px;color:#555;font-size:13px}.desktop-body{padding:18px;color:#777}.line{height:8px;background:#ddd;margin:16px 0;width:83%}.line.short{width:52%}.underlay-note{font-size:13px;margin-top:28px}.phone{position:absolute;left:52%;top:30px;width:230px;height:460px;background:#fff;border:2px solid #333;border-radius:20px;padding:14px;opacity:.5;transition:opacity .1s;box-shadow:3px 3px 0 #aaa}.phone-top{font-size:11px;display:flex;justify-content:space-between;border-bottom:1px solid #aaa;padding:0 4px 12px}.phone h3{font-size:22px;margin:22px 0 16px}.tile{border:1px solid #bbb;padding:14px 10px;margin-top:12px;background:#eee}.tile strong{display:block;font-weight:500}.tile small{color:#666;font-size:11px}.apps{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:24px}.app{height:43px;border:1px solid #888;border-radius:9px;font-size:12px;display:grid;place-items:center}.phone-bottom{position:absolute;bottom:12px;left:80px;width:66px;border-top:3px solid #666}.scene-footer{position:absolute;bottom:10px;left:16px;font-size:12px;color:#666}.toolbar{border:1px solid #777;background:white;margin-top:12px;padding:14px 16px}.toolbar-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.controls input[type=range]{flex:1;min-width:90px;accent-color:#444}.controls input[type=number]{width:64px;padding:4px;border:1px solid #aaa}.status{font-size:13px;color:#555;margin-top:10px}.steps{margin-top:22px;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.step{border-top:2px solid #aaa;padding:12px 0;font-size:13px}.step strong{display:block;margin-bottom:4px}.footer{font-size:12px;color:#666;margin-top:22px;border-top:1px solid #ccc;padding-top:15px}@media(max-width:800px){main{padding:20px}.layout{grid-template-columns:1fr}.scene{height:520px}.phone{left:48%;transform:translateX(-10%)}.steps{grid-template-columns:1fr}.toolbar-top{align-items:flex-start;flex-wrap:wrap}}
+</style>
+<main>
+<div class="label">方案草图 · 2026-10-15 · 路线 A</div>
+<h1>手机悬浮在电脑上，点击去向由你决定</h1>
+<p class="intro">先做 USB，再做局域网。滑块控制画面显隐，操控与穿透单独切换。</p>
+<div class="layout">
+<aside class="panel">
+<h2>连接设备</h2>
+<div class="label">当前设备</div>
+<div class="device"><strong>我的 Android 手机</strong><div class="row"><span id="connection">USB · 已连接（示意）</span><span class="tag" id="deviceTag">已授权</span></div></div>
+<label for="transport">连接方式</label>
+<select id="transport"><option>USB 有线 · 首版</option><option disabled>局域网 · 下一阶段</option></select>
+<button class="wide" id="connect">断开（示意）</button>
+<p class="aside-note">首次连接：开启 USB 调试，并在手机上允许这台电脑。手机无需 Root。</p>
+<p class="aside-note">当前档位：均衡<br>长边 1920 / 最高 60 FPS<br>这是候选配置，性能尚待实测。</p>
+<p class="aside-note">主界面、投屏画面和工具条是独立入口。工具条与托盘始终可以找回画面。</p>
+</aside>
+<section aria-label="悬浮效果示意">
+<!-- 底层文档仅用于展示透明关系，真实软件直接与 Windows 桌面合成。 -->
+<div class="scene">
+<div class="desktop"><span class="label">电脑桌面 · 背景应用示意</span><div class="desktop-window"><div class="desktop-title">工作笔记</div><div class="desktop-body"><strong>今天的待办</strong><div class="line"></div><div class="line short"></div><div class="line"></div><div class="line short"></div><p class="underlay-note">半透明时能看见下面的内容。<br>穿透后可继续操作下方电脑应用。</p></div></div></div>
+<div class="phone" id="phone" aria-label="手机画面示意"><div class="phone-top"><span>10:15</span><span>Wi-Fi · 85%</span></div><h3>我的手机</h3><div class="tile"><strong>消息</strong><small>点击、长按、滑动</small></div><div class="tile"><strong>日常应用</strong><small>鼠标操作手机界面</small></div><div class="apps"><div class="app">相册</div><div class="app">日历</div><div class="app">设置</div></div><div class="phone-bottom"></div></div>
+<div class="scene-footer" id="sceneNote">当前：半透明，鼠标操控手机</div>
+</div>
+<!-- 工具条独立于画面，透明度为0时仍可操作。 -->
+<div class="toolbar">
+<div class="toolbar-top"><strong>独立控制工具条</strong><div class="controls"><button id="mode" aria-pressed="false">操控手机</button><button id="top" aria-pressed="true">置顶：开</button><button class="primary" id="restore">恢复 100</button></div></div>
+<div class="controls"><label for="opacity">不透明度</label><input id="opacity" type="range" min="0" max="100" value="50"><input id="number" aria-label="不透明度数值" type="number" min="0" max="100" value="50"><span>%</span></div>
+<div class="status" id="status" role="status" aria-live="polite">50% · 操控手机；穿透开关与不透明度独立。</div>
+</div>
+</section>
+</div>
+<div class="steps"><div class="step"><strong>① 半透明 + 操控手机</strong>可看见下方内容，点击仍交给手机。</div><div class="step"><strong>② 半透明 + 鼠标穿透</strong>画面保留，点击交给下方电脑应用。</div><div class="step"><strong>③ 0% + 安全恢复</strong>画面消失、强制穿透；工具条、托盘和恢复热键保留。</div></div>
+<p class="footer">这是浏览器中的交互草图，未连接手机，也不会改变真实桌面的点击或置顶行为。真实 Windows 程序的透明视频兼容性、全局快捷键和流畅度需要 M0 实机验证。</p>
+</main>
+<script>
+let opacity=50,through=false,connected=true;
+const slider=document.getElementById('opacity'),num=document.getElementById('number'),phone=document.getElementById('phone'),mode=document.getElementById('mode'),status=document.getElementById('status'),note=document.getElementById('sceneNote');
+function render(){slider.value=opacity;num.value=opacity;phone.style.opacity=connected?opacity/100:0;mode.textContent=through?'鼠标穿透':'操控手机';mode.setAttribute('aria-pressed',String(through));mode.disabled=!connected||opacity===0;slider.disabled=!connected;num.disabled=!connected;const message=!connected?'已断开 · 点击连接，回到 100% 安全显示。':opacity===0?'0% · 手机画面不可见，已强制穿透。点击“恢复 100”找回。':`${opacity}% · ${through?'鼠标穿透，点击交给下方电脑应用':'操控手机，点击交给手机'}。`;status.textContent=message;note.textContent=!connected?'尚未连接 · 背景电脑应用仍可见':opacity===0?'手机画面已隐藏 · 独立工具条仍可使用':through?'当前：鼠标穿透，操作下方电脑应用':'当前：半透明，鼠标操控手机';document.getElementById('restore').disabled=!connected;}
+function setOpacity(v){opacity=Math.max(0,Math.min(100,Math.round(Number(v)||0)));if(opacity===0)through=true;render();}
+slider.addEventListener('input',e=>setOpacity(e.target.value));num.addEventListener('change',e=>setOpacity(e.target.value));mode.addEventListener('click',()=>{through=!through;render();});document.getElementById('restore').addEventListener('click',()=>{opacity=100;through=false;render();});document.getElementById('top').addEventListener('click',e=>{let on=e.target.getAttribute('aria-pressed')!=='true';e.target.setAttribute('aria-pressed',String(on));e.target.textContent='置顶：'+(on?'开':'关');});document.getElementById('connect').addEventListener('click',e=>{connected=!connected;if(connected){opacity=100;through=false;}e.target.textContent=connected?'断开（示意）':'连接（示意）';document.getElementById('connection').textContent=connected?'USB · 已连接（示意）':'未连接';document.getElementById('deviceTag').textContent=connected?'已授权':'待连接';render();});render();
+</script>
+</html>

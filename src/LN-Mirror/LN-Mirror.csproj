@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>LN-Mirror</AssemblyName>
+    <RootNamespace>LNMirror</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>LN-Mirror</Product>
+    <AssemblyTitle>LN-Mirror 手机悬浮投屏</AssemblyTitle>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <DebugType>embedded</DebugType>
+    <!-- 关闭 Trim/AOT：WPF 与 WinForms 不支持，且需要保证 scrcpy 子进程调用稳定 -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- WFO0003：DPI 由 app.manifest 的 PerMonitorV2 声明，WPF 自行处理，无需调用 WinForms 的 SetHighDpiMode -->
+    <NoWarn>$(NoWarn);CA1416;WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <!-- 内置官方 scrcpy 引擎（tools 目录由 build-tools 脚本按官方校验和下载） -->
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)..\..\tools\**\*">
+      <Link>tools\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

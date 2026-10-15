@@ -1,0 +1,24 @@
+# 构建产物
+bin/
+obj/
+dist/
+
+# 运行期输出（正常在 %AppData%\LN-Mirror，不在仓库内；这里防止误拷进来）
+selftest.txt
+*.log
+
+# 编辑器与系统
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+Thumbs.db
+desktop.ini
+
+# 说明：tools/ 下的 scrcpy 引擎（约 25 MB，17 个文件）保留在仓库里，
+# 这样换台机器或没有网络时也能直接构建。
+# 如果不想入库，删掉下面一行即可；之后用
+#   powershell -File scripts\fetch-scrcpy.ps1 -Version v5.0.1
+# 重新下载并自动校验官方 SHA256（版本与校验和记录在 tools/SCRCPY-VERSION.txt）。
+# tools/

@@ -1,0 +1,28 @@
+scrcpy 引擎锁定信息
+===================
+
+版本：scrcpy 5.0.1（win64）
+来源：https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/scrcpy-win64-v5.0.1.zip
+官方校验和清单：https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/SHA256SUMS.txt
+包 SHA256：b12a2c4ee8be317422451fc7dcf8ee20a71b5ea7ef9ad73ddd825a25316227a5
+校验日期：2026-10-15，与官方 SHA256SUMS.txt 逐字符一致
+下载目录：tools/scrcpy-win64-v5.0.1/
+
+随包组件（由官方发布包原样附带，未做二次编译或修改）
+--------------------------------------------------
+- scrcpy 5.0.1（Apache-2.0，包内 LICENSE.txt）
+- SDL 3.4.18（SDL3.dll，zlib 许可）
+- FFmpeg 7（avcodec/avformat/avutil 61-63 系列，许可取决于官方构建配置）
+- Android platform-tools adb 1.0.41（Android SDK Platform-Tools 许可，Apache-2.0）
+- libusb 1.0.30（LGPL-2.1）
+- scrcpy-server 5.0.1（与电脑端严格同版本）
+
+说明
+----
+1. 程序只启动 tools 目录里这一份 scrcpy 与 adb，通过 ADB / SCRCPY_SERVER_PATH 环境变量固定，
+   不会调用系统上其它位置的 scrcpy 或 adb。
+2. 本项目为个人自用工具，未对第三方二进制做重新分发。FFmpeg 在官方 Windows 包中的确切
+   构建配置（LGPL 还是 GPL）无法从压缩包内容直接判定，若将来要对外分发，需按官方构建参数
+   与各组件许可文本逐一核对后再决定附带哪些许可说明。
+3. 升级版本时用 scripts/fetch-scrcpy.ps1 -Version vX.Y.Z 下载并自动校验，
+   然后把上面的版本、来源与 SHA256 同步更新。

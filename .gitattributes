@@ -1,0 +1,29 @@
+# 换行策略：文本文件按仓库内 LF 存储，工作区随 core.autocrlf 转换
+* text=auto
+
+# 内置 scrcpy 引擎（官方发布包，约 25 MB）：整体按二进制处理，禁止换行转换
+tools/scrcpy-*/*.exe binary
+tools/scrcpy-*/*.dll binary
+tools/scrcpy-*/*.png binary
+tools/scrcpy-*/*.bat binary
+tools/scrcpy-*/*.vbs binary
+tools/scrcpy-*/scrcpy-server binary
+
+# 其余常见二进制
+*.dll binary
+*.exe binary
+*.pdb binary
+*.png binary
+*.ico binary
+*.zip binary
+*.xlsx binary
+
+# 脚本以 UTF-8 with BOM 保存（Windows PowerShell 5.1 读取无 BOM 脚本会按 ANSI 解析中文）
+*.ps1 text eol=crlf
+*.cs text
+*.xaml text
+*.csproj text
+*.config text
+*.manifest text
+*.md text
+tools/SCRCPY-VERSION.txt text
