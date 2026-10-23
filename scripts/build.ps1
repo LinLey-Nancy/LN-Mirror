@@ -63,13 +63,9 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败，退出码 $LASTEXITCODE" }
 }
 
-# 随包附带用户文档与引擎版本记录
+# 交付包里只放用户要用得上的东西：程序、引擎、使用说明。
+# 验证清单、引擎版本记录这些开发侧内容留在仓库里，不进包。
 Copy-Item (Join-Path $repoRoot 'docs\使用说明.md') $publishDir -Force
-Copy-Item (Join-Path $repoRoot 'docs\M0验证清单.md') $publishDir -Force
-Copy-Item (Join-Path $repoRoot 'tools\SCRCPY-VERSION.txt') $publishDir -Force
-
-$checklist = Join-Path $repoRoot "docs\测试清单-LN-Mirror-$version.xlsx"
-if (Test-Path $checklist) { Copy-Item $checklist $publishDir -Force }
 
 # 发布结果自检：引擎必须完整
 $engineDir = Get-ChildItem (Join-Path $publishDir 'tools') -Directory -ErrorAction SilentlyContinue |
@@ -86,13 +82,15 @@ foreach ($required in 'scrcpy.exe', 'adb.exe', 'scrcpy-server') {
 
 Write-Output "内置引擎：$($engineDir.Name)"
 
-# 无界面自检：确认包内引擎、adb 与 Win32 透明调用链可用
-$reportPath = Join-Path $publishDir 'selftest.txt'
+# 无界面自检：确认包内引擎、adb 与 Win32 透明调用链可用。
+# 报告写到临时目录，不能留在交付包里
+$reportPath = Join-Path ([System.IO.Path]::GetTempPath()) "LN-Mirror-packets-selftest-$PID.txt"
 $exe = Join-Path $publishDir 'LN-Mirror.exe'
 Write-Output '运行包内环境自检 …'
 $process = Start-Process -FilePath $exe -ArgumentList '--self-test', '--report', $reportPath -PassThru -Wait
 if ($process.ExitCode -ne 0) { throw "包内自检失败，退出码 $($process.ExitCode)" }
 Get-Content $reportPath | ForEach-Object { "  $_" }
+Remove-Item $reportPath -Force -ErrorAction SilentlyContinue
 
 $zipPath = Join-Path $distRoot "$packageName.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }

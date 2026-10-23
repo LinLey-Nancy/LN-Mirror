@@ -27,9 +27,10 @@
     <NoWarn>$(NoWarn);CA1416;WFO0003</NoWarn>
   </PropertyGroup>
 
-  <!-- 内置官方 scrcpy 引擎（tools 目录由 build-tools 脚本按官方校验和下载） -->
+  <!-- 内置官方 scrcpy 引擎（tools 目录由 build-tools 脚本按官方校验和下载）。
+       SCRCPY-VERSION.txt 是开发侧 fetch-scrcpy.ps1 的版本记录，程序运行时不读，不随发布带出。 -->
   <ItemGroup>
-    <Content Include="$(MSBuildThisFileDirectory)..\..\tools\**\*">
+    <Content Include="$(MSBuildThisFileDirectory)..\..\tools\**\*" Exclude="$(MSBuildThisFileDirectory)..\..\tools\SCRCPY-VERSION.txt">
       <Link>tools\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
