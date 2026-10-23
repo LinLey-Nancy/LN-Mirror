@@ -68,6 +68,9 @@ internal static class NativeMethods
     internal const int VK_RBUTTON = 0x02;
     internal const int VK_MBUTTON = 0x04;
 
+    /// <summary>系统箭头光标（IDC_ARROW）。</summary>
+    internal const int IDC_ARROW = 32512;
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct POINT
     {
@@ -126,8 +129,27 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr SetCursor(IntPtr hCursor);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr hCursor);
+
     [DllImport("user32.dll")]
     internal static extern IntPtr WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+    internal const uint GA_ROOT = 2;
 
     [DllImport("user32.dll")]
     internal static extern bool GetCursorPos(out POINT lpPoint);
@@ -203,9 +225,23 @@ internal static class NativeMethods
             ? GetWindowLongPtr64(hWnd, nIndex)
             : new IntPtr(GetWindowLong32W(hWnd, nIndex));
 
-    internal static int GetWindowStyle(IntPtr hWnd) => GetWindowLongPtrSafe(hWnd, GWL_STYLE).ToInt32();
+    internal static int GetWindowStyle(IntPtr hWnd)
+        // 不能用 ToInt32()：GetWindowLongPtr 在 x64 上把 32 位样式值零扩展，
+        // WS_POPUP 这类最高位是 1 的样式（无边框画面窗口就是这么来的）会超过 Int32 上限，
+        // 之前这里直接 OverflowException，会话建立被连崩数次。按 LONG 的低 32 位截断才对。
+        => unchecked((int)GetWindowLongPtrSafe(hWnd, GWL_STYLE).ToInt64());
 
-    internal static int GetWindowExStyle(IntPtr hWnd) => GetWindowLongPtrSafe(hWnd, GWL_EXSTYLE).ToInt32();
+    internal static int GetWindowExStyle(IntPtr hWnd)
+        => unchecked((int)GetWindowLongPtrSafe(hWnd, GWL_EXSTYLE).ToInt64());
+
+    /// <summary>改写窗口样式并强制刷新非客户区，让标题栏/边框立刻生效。</summary>
+    internal static bool SetWindowStyle(IntPtr hWnd, int style)
+    {
+        SetWindowLongPtrSafe(hWnd, GWL_STYLE, new IntPtr(style));
+        SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        return true;
+    }
 
     internal static bool SetWindowExStyle(IntPtr hWnd, int style)
     {

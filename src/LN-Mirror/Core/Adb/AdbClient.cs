@@ -177,13 +177,44 @@ public sealed class AdbClient
         return line.Trim();
     }
 
-    /// <summary>局域网连接（下一阶段使用）。当前版本不自动调用。</summary>
+    /// <summary>局域网连接。</summary>
     public async Task<AdbResult> ConnectAsync(string address, CancellationToken ct)
     {
         var result = await RunAsync(["connect", address], ct).ConfigureAwait(false);
         var line = FirstMeaningfulLine(result.Combined);
         AppLog.Info($"[ADB] 局域网连接 {address}：{line ?? result.ExitCode.ToString()}");
         return result;
+    }
+
+    /// <summary>connect 命令的输出判读。adb 即使失败也常返回退出码 0，必须看文本。</summary>
+    public static bool IsConnectSuccess(AdbResult result)
+    {
+        var text = result.Combined;
+        return text.Contains("connected to", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("already connected", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>把 connect/pair 的失败输出归类成界面提示。</summary>
+    public static string DescribeConnectFailure(AdbResult result)
+    {
+        var text = result.Combined;
+        if (text.Contains("refused", StringComparison.OrdinalIgnoreCase))
+            return "连接被拒绝：请确认手机已开启“无线调试”，且端口是“无线调试”主页显示的端口。";
+        if (text.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("no route", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("unreachable", StringComparison.OrdinalIgnoreCase))
+            return "连接超时或不可达：请检查电脑与手机是否在同一网段、路由器是否开了客户端隔离、防火墙是否拦截。";
+        if (text.Contains("authenticate", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
+            return "认证失败：配对信息可能已失效，请在手机上重新配对。";
+        if (text.Contains("failed", StringComparison.OrdinalIgnoreCase))
+        {
+            var line = FirstMeaningfulLine(text);
+            return line is null ? "连接失败，原因未知。" : $"连接失败：{line}";
+        }
+
+        return "连接失败，请查看日志。";
     }
 
     /// <summary>无线调试配对。配对码只用于本次命令，不写入日志。</summary>
@@ -195,8 +226,36 @@ public sealed class AdbClient
         return result;
     }
 
+    /// <summary>断开指定的局域网设备。</summary>
+    public async Task<AdbResult> DisconnectAsync(string address, CancellationToken ct)
+    {
+        var result = await RunAsync(["disconnect", address], ct).ConfigureAwait(false);
+        AppLog.Info($"[ADB] 断开局域网设备 {address}：{FirstMeaningfulLine(result.Combined) ?? result.ExitCode.ToString()}");
+        return result;
+    }
+
+    /// <summary>查询 mDNS 发现到的无线调试服务（配对与可连接两种）。</summary>
+    public async Task<AdbResult> GetMdnsServicesAsync(CancellationToken ct)
+        => await RunAsync(["mdns", "services"], ct, timeoutMs: 15000, log: false).ConfigureAwait(false);
+
+    /// <summary>USB 备用路径：把已通过 USB 授权的设备切到 TCP/IP 调试（仅限可信局域网）。</summary>
+    public async Task<AdbResult> EnableTcpIpAsync(string serial, int port, CancellationToken ct)
+    {
+        var result = await RunAsync(["-s", serial, "tcpip", port.ToString(System.Globalization.CultureInfo.InvariantCulture)], ct).ConfigureAwait(false);
+        AppLog.Info($"[ADB] 设备 {serial} 切换 TCP/IP 端口 {port}：{FirstMeaningfulLine(result.Combined) ?? result.ExitCode.ToString()}");
+        return result;
+    }
+
+    /// <summary>配对命令的地址与配对码都不写日志；其它命令原样描述。</summary>
     private static string Describe(IReadOnlyList<string> args)
-        => string.Join(' ', args.Select(a => a.Length > 6 && a.StartsWith("pair") ? "pair …" : a));
+    {
+        if (args.Count > 0 && string.Equals(args[0], "pair", StringComparison.Ordinal))
+        {
+            return "pair …（地址与配对码不记录）";
+        }
+
+        return string.Join(' ', args);
+    }
 
     private static string? FirstMeaningfulLine(string? text)
     {

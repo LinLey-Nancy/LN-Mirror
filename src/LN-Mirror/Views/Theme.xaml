@@ -14,6 +14,8 @@
     <SolidColorBrush x:Key="ErrBrush" Color="#FFC0392B" />
     <SolidColorBrush x:Key="SliderTrackBrush" Color="#FFD2D2D0" />
 
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
     <Style x:Key="SectionLabel" TargetType="TextBlock">
         <Setter Property="FontSize" Value="12" />
         <Setter Property="Foreground" Value="{StaticResource SubTextBrush}" />

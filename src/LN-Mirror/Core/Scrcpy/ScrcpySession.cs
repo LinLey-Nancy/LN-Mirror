@@ -130,7 +130,7 @@ public sealed class ScrcpySession : IDisposable
             if (!closed)
             {
                 process.CloseMainWindow();
-                closed = process.WaitForExit((int)StopTimeout.TotalMilliseconds);
+                closed = process.WaitForExit(2000);
             }
 
             if (!closed)
@@ -251,6 +251,25 @@ public sealed class ScrcpySession : IDisposable
         return best;
     }
 
+    /// <summary>
+    /// 不等正常收尾，直接结束进程树。
+    /// 退出流程卡住时的兜底：宁可手机端残留一次会话，也不要在桌面上留下孤儿画面窗口。
+    /// </summary>
+    public void ForceStop()
+    {
+        var process = _process;
+        if (process is null) return;
+
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // 进程可能刚好已经退出
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -258,11 +277,30 @@ public sealed class ScrcpySession : IDisposable
 
         Stop();
 
-        if (_process is not null)
+        var process = _process;
+        if (process is null) return;
+
+        process.Exited -= OnProcessExited;
+
+        // Process 对象是在它自己的内部锁下抛 Exited 事件的：
+        // 事件处理里如果同步等界面线程，就会和界面线程释放这个对象时抢同一把锁，
+        // 两边互等，整个进程就停在"图标没了但没退出"的状态（实测复现）。
+        // 所以这里只解绑事件，Process 对象本身放到后台线程释放。
+        Task.Run(() =>
         {
-            _process.Exited -= OnProcessExited;
-            _process.Dispose();
-            _process = null;
-        }
+            try
+            {
+                process.Dispose();
+            }
+            catch
+            {
+                // 进程可能刚好已经退出
+            }
+            finally
+            {
+                // 延后清空：退出码还要靠它读
+                if (ReferenceEquals(_process, process)) _process = null;
+            }
+        });
     }
 }

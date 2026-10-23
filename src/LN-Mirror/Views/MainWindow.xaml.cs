@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using LNMirror.Core;
+using LNMirror.Core.Adb;
 using LNMirror.Core.Configuration;
 using LNMirror.Core.Diagnostics;
 
@@ -60,14 +61,88 @@ public partial class MainWindow : Window
         ApplyPhaseVisual();
     }
 
+    private async void OnRefreshLanClick(object sender, RoutedEventArgs e)
+        => await _controller.RefreshLanDiscoveryAsync();
+
+    private async void OnDiscoveredItemClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not MdnsServiceInfo service) return;
+
+        if (service.Kind == MdnsServiceKind.Pairing)
+        {
+            // 配对服务只提供地址，配对码仍需用户在手机配对对话框里查看后输入
+            PairAddressBox.Text = service.Address;
+            PairCodeBox.Focus();
+            return;
+        }
+
+        await _controller.ConnectLanAsync(service.Address);
+        ApplyPhaseVisual();
+        if (_controller.IsConnected) _tray.ShowToolbar();
+    }
+
+    private async void OnPairConnectClick(object sender, RoutedEventArgs e)
+    {
+        await _controller.PairAndConnectAsync(PairAddressBox.Text, PairCodeBox.Text);
+        PairCodeBox.Text = string.Empty;
+        ApplyPhaseVisual();
+        if (_controller.IsConnected) _tray.ShowToolbar();
+    }
+
+    private async void OnManualLanConnectClick(object sender, RoutedEventArgs e)
+    {
+        await _controller.ConnectLanAsync(ManualAddressBox.Text);
+        ApplyPhaseVisual();
+        if (_controller.IsConnected) _tray.ShowToolbar();
+    }
+
+    private async void OnUsbSwitchLanClick(object sender, RoutedEventArgs e)
+    {
+        await _controller.SwitchUsbToLanAsync(UsbSwitchAddressBox.Text);
+        ApplyPhaseVisual();
+        if (_controller.IsConnected) _tray.ShowToolbar();
+    }
+
+    private async void OnHistoryConnectClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not LanDeviceEntry entry) return;
+        await _controller.ConnectHistoryAsync(entry);
+        ApplyPhaseVisual();
+        if (_controller.IsConnected) _tray.ShowToolbar();
+    }
+
+    private async void OnHistoryRemoveClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not LanDeviceEntry entry) return;
+        await _controller.RemoveHistoryAsync(entry);
+    }
+
     private async void OnRestoreClick(object sender, RoutedEventArgs e)
     {
         await _controller.RestoreAsync();
         _tray.ShowToolbar();
     }
 
+    private void OnOpacityPresetClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: string tag }) return;
+        if (int.TryParse(tag, out var value)) _controller.Opacity = value;
+    }
+
     private async void OnVerifyPassThroughClick(object sender, RoutedEventArgs e)
         => await _controller.VerifyPassThroughAsync();
+
+    /// <summary>把工具条重新叫出来（收起之后唯一的找回入口之一）。</summary>
+    private void OnShowToolbarClick(object sender, RoutedEventArgs e)
+    {
+        if (!_controller.IsConnected)
+        {
+            _controller.Notice = "还没有连接，画面未建立时没有工具条。";
+            return;
+        }
+
+        _tray.ShowToolbar();
+    }
 
     private async void OnApplyAndReconnectClick(object sender, RoutedEventArgs e)
     {

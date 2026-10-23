@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="LN-Mirror 工具条"
-        Width="660" SizeToContent="Height"
+        SizeToContent="WidthAndHeight"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -22,7 +22,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
@@ -30,54 +30,56 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0" Style="{StaticResource StatusTag}" BorderBrush="#FFB9B9B7" Background="#FFF7F7F6"
-                        VerticalAlignment="Center" Margin="0,0,12,0" Padding="8,3">
-                    <TextBlock x:Name="ConnectionTag" Text="未连接" FontSize="12"/>
-                </Border>
+                <TextBlock Grid.Column="0" Text="不透明度" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <Slider Grid.Column="1" Width="86" Minimum="0" Maximum="100" TickFrequency="1" TickPlacement="BottomRight"
+                        IsSnapToTickEnabled="True" SmallChange="1" LargeChange="5"
+                        IsEnabled="{Binding OpacityEnabled}"
+                        Value="{Binding Opacity, Mode=TwoWay}"
+                        ToolTip="拖动改变画面不透明度"/>
+                <TextBox Grid.Column="2" Width="34" TextAlignment="Center" Text="{Binding Opacity, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                         IsEnabled="{Binding OpacityEnabled}" Margin="6,0,0,0" Padding="2,2"/>
+                <TextBlock Grid.Column="3" Text="%" VerticalAlignment="Center" Margin="4,0,0,0"/>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="不透明度" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <Slider Width="150" Minimum="0" Maximum="100" TickFrequency="1" TickPlacement="BottomRight"
-                            IsSnapToTickEnabled="True" SmallChange="1" LargeChange="5"
-                            IsEnabled="{Binding OpacityEnabled}"
-                            Value="{Binding Opacity, Mode=TwoWay}"/>
-                    <TextBox Width="42" TextAlignment="Center" Text="{Binding Opacity, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
-                             IsEnabled="{Binding OpacityEnabled}" Margin="8,0,2,0" Padding="2,2"/>
-                    <TextBlock Text="%" VerticalAlignment="Center"/>
-                </StackPanel>
-
-                <ToggleButton Grid.Column="3" Style="{StaticResource ToggleButtonFlat}" Content="操控手机"
+                <ToggleButton Grid.Column="4" Style="{StaticResource ToggleButtonFlat}"
+                              Content="{Binding PassThroughButtonText}"
                               IsChecked="{Binding PassThrough, Mode=TwoWay}" IsEnabled="{Binding PassThroughEnabled}"
-                              Click="OnPassThroughClick" Margin="12,0,0,0"/>
+                              Margin="10,0,0,0" ToolTip="开关鼠标穿透：打开后点击会穿过画面落到下面的窗口"/>
 
-                <ToggleButton Grid.Column="4" Style="{StaticResource ToggleButtonFlat}" Content="置顶 开"
-                              IsChecked="{Binding Topmost, Mode=TwoWay}" Click="OnTopmostClick" Margin="8,0,0,0"/>
+                <ToggleButton Grid.Column="5" Style="{StaticResource ToggleButtonFlat}"
+                              Content="{Binding TopmostButtonText}"
+                              IsChecked="{Binding Topmost, Mode=TwoWay}" Margin="6,0,0,0"/>
 
-                <Button Grid.Column="5" Content="恢复 100" Style="{StaticResource PrimaryButton}" Click="OnRestoreClick" Margin="8,0,0,0"/>
+                <Button Grid.Column="6" Content="恢复 100" Style="{StaticResource PrimaryButton}" Click="OnRestoreClick" Margin="8,0,0,0"
+                        Padding="10,4" MinHeight="26" FontSize="12" ToolTip="恢复 100% 不透明度、取消穿透、把画面移回可见位置"/>
 
-                <Button Grid.Column="6" Content="主窗口" Style="{StaticResource ToolButton}" Click="OnShowMainWindowClick" Margin="8,0,0,0"/>
-
-                <Border Grid.Column="7" Width="16" Height="22" CornerRadius="2" Background="#FFEDEDEB" Margin="8,0,0,0"
-                        MouseLeftButtonDown="OnDragAreaMouseDown" ToolTip="按住这里可以移动画面窗口">
+                <Border Grid.Column="7" Width="14" Height="20" CornerRadius="2" Background="#FFEDEDEB" Margin="8,0,0,0"
+                        x:Name="DragHandle" MouseLeftButtonDown="OnDragAreaMouseDown" ToolTip="按住这里可以移动">
                     <Grid>
-                        <Rectangle Width="1" Height="10" Fill="#FFB5B5B3" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Rectangle Width="1" Height="9" Fill="#FFB5B5B3" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
             </Grid>
 
             <Grid Margin="0,7,0,0">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBlock x:Name="HintText" Grid.Column="0" Text="{Binding StatusLine}" Foreground="{StaticResource SubTextBrush}"
-                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                <Border Grid.Column="0" x:Name="ConnectionTag" Style="{StaticResource StatusTag}" BorderBrush="#FFB9B9B7" Background="#FFF7F7F6"
+                        VerticalAlignment="Center" Margin="0,0,8,0" Padding="8,3"
+                        MouseLeftButtonDown="OnDragAreaMouseDown" ToolTip="按住这里可以移动">
+                    <TextBlock x:Name="ConnectionTagText" Text="未连接" FontSize="12"/>
+                </Border>
 
-                <Button x:Name="RecoverButton" Grid.Column="1" Content="找回画面" Style="{StaticResource ToolButton}" Click="OnRecoverClick" Margin="8,0,0,0"
+                <TextBlock x:Name="HintText" Grid.Column="1" Text="{Binding StatusLine}" Foreground="{StaticResource SubTextBrush}"
+                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center" MaxWidth="220"/>
+
+                <Button x:Name="RecoverButton" Grid.Column="2" Content="找回画面" Style="{StaticResource ToolButton}" Click="OnRecoverClick" Margin="8,0,0,0"
                         Visibility="Collapsed"/>
-                <Button Grid.Column="2" Content="收起工具条" Style="{StaticResource ToolButton}" Click="OnHideClick" Margin="8,0,0,0"/>
+                <Button Grid.Column="3" Content="收起" Style="{StaticResource ToolButton}" Click="OnHideClick" Margin="6,0,0,0"/>
             </Grid>
         </StackPanel>
     </Border>

@@ -69,7 +69,13 @@ public static class AppLog
     public static void Error(string message) => Write(LogLevel.Error, message);
 
     public static void Error(string message, Exception ex)
-        => Write(LogLevel.Error, $"{message}：{ex.GetType().Name} {ex.Message}");
+    {
+        // 带堆栈：没有堆栈的错误日志等于只能猜，异常类名+消息不足以定位
+        var stack = string.IsNullOrWhiteSpace(ex.StackTrace)
+            ? string.Empty
+            : "\n" + string.Join("\n", ex.StackTrace.Split('\n').Select(l => "    " + l.TrimEnd()));
+        Write(LogLevel.Error, $"{message}：{ex.GetType().Name} {ex.Message}{stack}");
+    }
 
     public static void Write(LogLevel level, string message)
     {

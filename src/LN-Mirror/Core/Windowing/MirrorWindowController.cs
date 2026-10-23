@@ -136,11 +136,75 @@ public sealed class MirrorWindowController : IDisposable
         return new WindowRect(rect.Left, rect.Top, rect.Right, rect.Bottom);
     }
 
+    /// <summary>
+    /// 画面在屏幕上的实际范围（客户区，不含系统标题栏）。
+    /// 悬停判定、把手定位、工具条贴合都以它为准，避免把标题栏算进画面里。
+    /// </summary>
+    public WindowRect? GetContentRect()
+    {
+        if (!IsValid) return null;
+        if (!NativeMethods.GetClientRect(_handle, out var client)) return null;
+
+        var origin = new NativeMethods.POINT { X = 0, Y = 0 };
+        if (!NativeMethods.ClientToScreen(_handle, ref origin)) return null;
+
+        int width = client.Right - client.Left;
+        int height = client.Bottom - client.Top;
+        if (width <= 0 || height <= 0) return null;
+
+        return new WindowRect(origin.X, origin.Y, origin.X + width, origin.Y + height);
+    }
+
+    /// <summary>
+    /// 运行时增删系统窗口装饰（标题栏与边框），不需要重启 scrcpy。
+    /// 与 SDL 自己的做法一致：去掉 WS_CAPTION / WS_THICKFRAME 即为无边框窗口。
+    /// </summary>
+    public bool ApplyBorderless(bool borderless)
+    {
+        if (!IsValid) return false;
+
+        int style = NativeMethods.GetWindowStyle(_handle);
+        int updated = borderless
+            ? style & ~NativeMethods.WS_CAPTION & ~NativeMethods.WS_THICKFRAME
+            : style | NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME;
+
+        if (updated == style) return true;
+
+        NativeMethods.SetWindowStyle(_handle, updated);
+        AppLog.Debug($"[窗口] 系统边框={(borderless ? "无" : "有")}（运行时切换）");
+        return true;
+    }
+
+    /// <summary>把画面窗口排除在任务栏与 Alt+Tab 之外，避免多出一个独立图标。</summary>
+    public bool ApplyToolWindow(bool toolWindow)
+    {
+        if (!IsValid) return false;
+
+        var ex = NativeMethods.GetWindowExStyle(_handle);
+        bool had = (ex & NativeMethods.WS_EX_TOOLWINDOW) != 0;
+        if (had == toolWindow) return true;
+
+        ex = toolWindow ? ex | NativeMethods.WS_EX_TOOLWINDOW : ex & ~NativeMethods.WS_EX_TOOLWINDOW;
+        NativeMethods.SetWindowExStyle(_handle, ex);
+        AppLog.Debug($"[窗口] 任务栏图标={(toolWindow ? "已隐藏" : "显示")}");
+        return true;
+    }
+
     public bool MoveTo(int x, int y)
     {
         if (!IsValid) return false;
         return NativeMethods.SetWindowPos(_handle, IntPtr.Zero, x, y, 0, 0,
             NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+    }
+
+    /// <summary>移动并缩放画面窗口（悬停边框拖动/缩放用）。scrcpy 会自行按比例适配新尺寸。</summary>
+    public bool SetRect(int x, int y, int width, int height)
+    {
+        if (!IsValid) return false;
+        width = Math.Max(width, 120);
+        height = Math.Max(height, 200);
+        return NativeMethods.SetWindowPos(_handle, IntPtr.Zero, x, y, width, height,
+            NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
     }
 
     /// <summary>把窗口移回可见显示器的工作区，避免拔掉显示器或改分辨率后画面找不到。</summary>
@@ -173,11 +237,21 @@ public sealed class MirrorWindowController : IDisposable
         return right - left > 40 && bottom - top > 40;
     }
 
-    private static WindowRect? GetWorkAreaOfNearestMonitor()
+    private WindowRect? GetWorkAreaOfNearestMonitor()
     {
-        NativeMethods.GetCursorPos(out var cursor);
-        var point = new NativeMethods.POINT { X = cursor.X, Y = cursor.Y };
-        var monitor = NativeMethods.MonitorFromPoint(point, NativeMethods.MONITOR_DEFAULTTONEAREST);
+        // 用被移动的窗口自己所在的显示器，而不是鼠标所在的显示器：
+        // 按鼠标选会把别人的画面窗口拽到另一个屏幕上
+        var monitor = _handle != IntPtr.Zero
+            ? NativeMethods.MonitorFromWindow(_handle, NativeMethods.MONITOR_DEFAULTTONEAREST)
+            : IntPtr.Zero;
+
+        if (monitor == IntPtr.Zero)
+        {
+            NativeMethods.GetCursorPos(out var cursor);
+            var point = new NativeMethods.POINT { X = cursor.X, Y = cursor.Y };
+            monitor = NativeMethods.MonitorFromPoint(point, NativeMethods.MONITOR_DEFAULTTONEAREST);
+        }
+
         var info = new NativeMethods.MONITORINFO
         {
             cbSize = System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.MONITORINFO>(),
