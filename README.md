@@ -2,8 +2,8 @@
 
 在 Windows 桌面上半透明悬浮显示安卓手机，并用鼠标直接操作它。
 
-- 详细设计：[`Android-Windows投屏方案.md`](Android-Windows投屏方案.md)（路线 A：包装官方 scrcpy）
-- 交互草图：[`投屏界面草图.html`](投屏界面草图.html)（浏览器里的概念示意）
+- 详细设计：[`Android-Windows投屏方案.md`](docs/Android-Windows投屏方案.md)（路线 A：包装官方 scrcpy）
+- 交互草图：[`投屏界面草图.html`](docs/投屏界面草图.html)（浏览器里的概念示意）
 - 面向使用者的说明：[`docs/使用说明.md`](docs/使用说明.md)（会随交付包一起分发）
 - 版本更新：[`CHANGELOG.md`](CHANGELOG.md)
 - 实机验证：[`docs/M0验证清单.md`](docs/M0验证清单.md)
@@ -25,9 +25,7 @@
 
 ```
 LN-Mirror/
-├─ Android-Windows投屏方案.md     详细设计（唯一权威来源）
-├─ 投屏界面草图.html / .png        交互概念草图
-├─ docs/                          使用说明、M0 实机验证清单
+├─ docs/                          全部文档：使用说明、方案、M0 验证清单、交互草图、测试清单
 ├─ scripts/                       fetch-scrcpy.ps1、build.ps1、make-icon.ps1
 ├─ tools/                         内置官方 scrcpy（锁定版本 + SHA256 记录）
 ├─ src/LN-Mirror/                 WPF 主程序（C# / .NET 10）
