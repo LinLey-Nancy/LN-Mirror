@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LN-Mirror · 图标概念</title>
+<style>
+  *{box-sizing:border-box}body{margin:0;background:#101116;color:#ececf2;font:14px/1.6 "Microsoft YaHei UI",system-ui,sans-serif}main{max-width:1320px;margin:auto;padding:44px 36px 56px}header{display:flex;align-items:end;justify-content:space-between;gap:24px;margin-bottom:30px}h1{font-size:28px;line-height:1.2;margin:0 0 8px;letter-spacing:-.5px}header p{margin:0;color:#999dad}.eyebrow{font:11px/1.4 Consolas,monospace;letter-spacing:2px;color:#8ef1d2;text-transform:uppercase;margin-bottom:12px}.note{color:#777d8c;font-size:12px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.card{background:#191b23;border:1px solid #2b2e39;border-radius:18px;overflow:hidden}.stage{min-height:330px;display:grid;place-items:center;padding:34px;background:radial-gradient(circle at 50% 38%,#292d39 0,#1c1e26 56%,#171920 100%)}.hero{width:256px;height:256px;filter:drop-shadow(0 20px 25px #0006)}.meta{padding:22px 24px 20px}.title-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}.number{font:12px Consolas,monospace;color:#898e9c}.meta h2{font-size:18px;margin:0}.meta p{color:#9da2af;font-size:13px;margin:0 0 18px;min-height:42px}.sizes{display:flex;align-items:end;gap:18px;border-top:1px solid #2a2d37;padding-top:18px}.sample{display:grid;gap:7px;justify-items:center;color:#717685;font:10px Consolas,monospace}.sample svg{display:block;background:#22252e;border-radius:4px}.light .sample svg{background:#e6e6e9}.tag{margin-left:auto;font-size:10px;letter-spacing:1px;color:#858b99;border:1px solid #363a46;border-radius:99px;padding:2px 8px}@media(max-width:1050px){.grid{grid-template-columns:1fr}.stage{min-height:300px}.meta p{min-height:0}}@media(max-width:600px){main{padding:28px 18px}.note{display:none}.hero{width:224px;height:224px}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="a-bg" x1="30" y1="20" x2="226" y2="240" gradientUnits="userSpaceOnUse"><stop stop-color="#30235A"/><stop offset="1" stop-color="#111426"/></linearGradient>
+    <linearGradient id="a-mark" x1="46" y1="45" x2="214" y2="208" gradientUnits="userSpaceOnUse"><stop stop-color="#83F4CF"/><stop offset=".52" stop-color="#7CCBEF"/><stop offset="1" stop-color="#AA9CF8"/></linearGradient>
+    <linearGradient id="b-bg" x1="20" y1="20" x2="236" y2="236" gradientUnits="userSpaceOnUse"><stop stop-color="#123C3A"/><stop offset="1" stop-color="#0A1822"/></linearGradient>
+    <linearGradient id="b-mark" x1="46" y1="52" x2="214" y2="202" gradientUnits="userSpaceOnUse"><stop stop-color="#E8FFB0"/><stop offset=".45" stop-color="#7CF4CD"/><stop offset="1" stop-color="#67B7F6"/></linearGradient>
+    <radialGradient id="c-bg" cx="26%" cy="15%" r="100%"><stop stop-color="#D2C7FF"/><stop offset=".46" stop-color="#967FE9"/><stop offset="1" stop-color="#50409F"/></radialGradient>
+    <linearGradient id="c-left" x1="52" y1="54" x2="151" y2="200" gradientUnits="userSpaceOnUse"><stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#DCFFF3"/></linearGradient>
+    <linearGradient id="c-right" x1="118" y1="55" x2="210" y2="200" gradientUnits="userSpaceOnUse"><stop stop-color="#E9FFF8"/><stop offset="1" stop-color="#A5DFFF"/></linearGradient>
+    <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="7" stdDeviation="7" flood-color="#000" flood-opacity=".3"/></filter>
+    <path id="ligature" d="M48 192V64h40v64l80-64h40v128h-40v-64l-48 64H48Z"/>
+    <clipPath id="left-half"><path d="M0 0h130l-18 256H0Z"/></clipPath>
+    <clipPath id="right-half"><path d="M130 0h126v256H112Z"/></clipPath>
+  </defs>
+
+  <symbol id="icon-a" viewBox="0 0 256 256">
+    <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#a-bg)"/>
+    <rect x="9" y="9" width="238" height="238" rx="55" fill="none" stroke="#FFF" stroke-opacity=".1" stroke-width="2"/>
+    <g fill="url(#a-mark)" filter="url(#soft-shadow)">
+      <path d="M44 48h44v112h34l-16 44H44Z"/>
+      <path d="M126 48h40v156h-40ZM174 48h40v156h-40Z"/>
+      <path d="M126 48h40l48 112v44h-40l-48-112Z"/>
+    </g>
+    <path d="m126 48 40 0 12 24-40 0Z" fill="#FFF" opacity=".2"/>
+    <path d="m174 160 40 0v44h-40Z" fill="#6C5ACD" opacity=".2"/>
+  </symbol>
+
+  <symbol id="icon-b" viewBox="0 0 256 256">
+    <rect x="8" y="8" width="240" height="240" rx="76" fill="url(#b-bg)"/>
+    <path d="M28 177C82 220 174 220 228 177" fill="none" stroke="#8FF5D5" stroke-opacity=".08" stroke-width="26" stroke-linecap="round"/>
+    <use href="#ligature" fill="url(#b-mark)" stroke="url(#b-mark)" stroke-width="5" stroke-linejoin="round" filter="url(#soft-shadow)"/>
+    <path d="m88 128 80-64h14l-80 64Z" fill="#FFF" opacity=".28"/>
+    <circle cx="48" cy="48" r="4" fill="#B8FFE6" opacity=".65"/>
+  </symbol>
+
+  <symbol id="icon-c" viewBox="0 0 256 256">
+    <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#c-bg)"/>
+    <rect x="9" y="9" width="238" height="238" rx="57" fill="none" stroke="#FFF" stroke-opacity=".28" stroke-width="2"/>
+    <g filter="url(#soft-shadow)" stroke-width="3" stroke-linejoin="round">
+      <use href="#ligature" fill="url(#c-left)" stroke="url(#c-left)" clip-path="url(#left-half)" transform="translate(-3 0)"/>
+      <use href="#ligature" fill="url(#c-right)" stroke="url(#c-right)" clip-path="url(#right-half)" transform="translate(3 0)"/>
+    </g>
+    <path d="m88 128 80-64h12l-80 64Z" fill="#FFF" opacity=".16" clip-path="url(#right-half)"/>
+  </symbol>
+</svg>
+
+<main>
+<header>
+  <div><div class="eyebrow">LN-Mirror / Identity exploration</div><h1>不只是 LN，而是一个可记住的符号</h1><p>三个原创 SVG 方向 · LinLey Nancy · 应用于软件标识、任务栏与系统托盘</p></div>
+  <div class="note">256 px 主图 / 48 · 24 · 16 px 实际缩放</div>
+</header>
+<section class="grid">
+  <article class="card">
+    <div class="stage"><svg class="hero"><use href="#icon-a"/></svg></div>
+    <div class="meta"><div class="title-row"><span class="number">01</span><h2>晶格 LN</h2><span class="tag">负形 / 结构</span></div><p>把 L 与 N 做成相互嵌入的几何结构，更像一枚开发者印记，而不是两个普通字母。</p><div class="sizes"><span class="sample"><svg width="48" height="48"><use href="#icon-a"/></svg>48</span><span class="sample"><svg width="24" height="24"><use href="#icon-a"/></svg>24</span><span class="sample"><svg width="16" height="16"><use href="#icon-a"/></svg>16</span></div></div>
+  </article>
+  <article class="card">
+    <div class="stage"><svg class="hero"><use href="#icon-b"/></svg></div>
+    <div class="meta"><div class="title-row"><span class="number">02</span><h2>一笔 LN</h2><span class="tag">连字 / 折带</span></div><p>L 与 N 共用一条连续轮廓，圆角外框搭配折带高光，轻快、独特，也接近个人签名。</p><div class="sizes"><span class="sample"><svg width="48" height="48"><use href="#icon-b"/></svg>48</span><span class="sample"><svg width="24" height="24"><use href="#icon-b"/></svg>24</span><span class="sample"><svg width="16" height="16"><use href="#icon-b"/></svg>16</span></div></div>
+  </article>
+  <article class="card light">
+    <div class="stage"><svg class="hero"><use href="#icon-c"/></svg></div>
+    <div class="meta"><div class="title-row"><span class="number">03</span><h2>双相 LN</h2><span class="tag">镜像 / 切面</span></div><p>同一枚 LN 被镜像切成两个错位面，直接呼应 Mirror；亮紫底在托盘中更有辨识度。</p><div class="sizes"><span class="sample"><svg width="48" height="48"><use href="#icon-c"/></svg>48</span><span class="sample"><svg width="24" height="24"><use href="#icon-c"/></svg>24</span><span class="sample"><svg width="16" height="16"><use href="#icon-c"/></svg>16</span></div></div>
+  </article>
+</section>
+</main>
+</body>
+</html>

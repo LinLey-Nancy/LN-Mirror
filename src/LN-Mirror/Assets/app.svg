@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">LN-Mirror</title>
+  <desc id="desc">LinLey Nancy 的 LN 连字，以水平对齐的双相镜面呈现</desc>
+  <defs>
+    <radialGradient id="background" cx="26%" cy="15%" r="100%">
+      <stop stop-color="#D2C7FF"/>
+      <stop offset=".46" stop-color="#967FE9"/>
+      <stop offset="1" stop-color="#50409F"/>
+    </radialGradient>
+    <linearGradient id="left" x1="52" y1="54" x2="151" y2="200" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DCFFF3"/>
+    </linearGradient>
+    <linearGradient id="right" x1="118" y1="55" x2="210" y2="200" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E9FFF8"/>
+      <stop offset="1" stop-color="#A5DFFF"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="7" stdDeviation="7" flood-color="#000000" flood-opacity=".3"/>
+    </filter>
+    <path id="ligature" d="M48 192V64h40v64l80-64h40v128h-40v-64l-48 64H48Z"/>
+    <clipPath id="left-half"><path d="M0 0h130l-18 256H0Z"/></clipPath>
+    <clipPath id="right-half"><path d="M130 0h126v256H112Z"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#background)"/>
+  <rect x="9" y="9" width="238" height="238" rx="57" fill="none" stroke="#FFFFFF" stroke-opacity=".28" stroke-width="2"/>
+  <g filter="url(#shadow)" stroke-width="3" stroke-linejoin="round">
+    <use href="#ligature" fill="url(#left)" stroke="url(#left)" clip-path="url(#left-half)" transform="translate(-3 0)"/>
+    <use href="#ligature" fill="url(#right)" stroke="url(#right)" clip-path="url(#right-half)" transform="translate(3 0)"/>
+  </g>
+  <path d="m88 128 80-64h12l-80 64Z" fill="#FFFFFF" opacity=".16" clip-path="url(#right-half)"/>
+</svg>

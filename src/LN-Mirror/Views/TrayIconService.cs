@@ -79,25 +79,17 @@ public sealed class TrayIconService : IDisposable
 
     private static Icon LoadIcon()
     {
-        var candidates = new[]
+        try
         {
-            Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"),
-            Path.Combine(AppContext.BaseDirectory, "app.ico"),
-        };
-
-        foreach (var path in candidates)
-        {
-            if (File.Exists(path))
+            var processPath = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(processPath))
             {
-                try
-                {
-                    return new Icon(path);
-                }
-                catch (Exception ex)
-                {
-                    AppLog.Warn($"[托盘] 读取图标失败：{ex.Message}");
-                }
+                return Icon.ExtractAssociatedIcon(processPath) ?? SystemIcons.Application;
             }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"[托盘] 读取图标失败：{ex.Message}");
         }
 
         return SystemIcons.Application;
