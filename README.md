@@ -1,5 +1,9 @@
 <div align="center">
 
+<p>
+<img src="src/LN-Mirror/Assets/app.png" width="128" alt="LN-Mirror 应用图标" />
+</p>
+
 <h1>LN-Mirror</h1>
 
 <p>在 Windows 桌面上显示一个半透明的安卓手机画面：平时安静地摆在一旁，需要操作时用鼠标直接点击，不用时几乎看不见。</p>
