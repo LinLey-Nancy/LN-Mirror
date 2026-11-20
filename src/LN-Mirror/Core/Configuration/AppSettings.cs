@@ -50,6 +50,34 @@ public static class HoverRevealHints
 
 public sealed record HintOption(string Key, string DisplayName);
 
+public static class HoverDelayModes
+{
+    public const string Off = "Off";
+    public const string Smart = "Smart";
+    public const string OneSecond = "OneSecond";
+    public const string TwoSeconds = "TwoSeconds";
+    public const string Custom = "Custom";
+    public const int SmartMilliseconds = 350;
+    public const int DefaultCustomMilliseconds = 500;
+    public const int MinimumCustomMilliseconds = 100;
+    public const int MaximumCustomMilliseconds = 60000;
+
+    public static string Normalize(string? mode) => mode switch
+    {
+        Off or OneSecond or TwoSeconds or Custom => mode,
+        _ => Smart,
+    };
+
+    public static int GetMilliseconds(string mode, int customMilliseconds) => mode switch
+    {
+        Off => 0,
+        OneSecond => 1000,
+        TwoSeconds => 2000,
+        Custom => customMilliseconds,
+        _ => SmartMilliseconds,
+    };
+}
+
 /// <summary>本地配置。只保存显示偏好与非敏感的局域网连接信息，不保存配对码等授权凭据。</summary>
 public sealed class AppSettings
 {
@@ -96,6 +124,10 @@ public sealed class AppSettings
 
     /// <summary>开启后画面常态完全透明，鼠标移到画面上才显示出来。</summary>
     public bool HoverRevealEnabled { get; set; }
+
+    public string HoverDelayMode { get; set; } = HoverDelayModes.Smart;
+
+    public int HoverCustomDelayMs { get; set; } = HoverDelayModes.DefaultCustomMilliseconds;
 
     /// <summary>画面看不见时用什么方式提示它的位置（None / Outline / CornerMark）。</summary>
     public string HoverRevealHint { get; set; } = HoverRevealHints.Outline;
@@ -205,6 +237,9 @@ public static class SettingsStore
         {
             settings.HoverRevealHint = HoverRevealHints.Outline;
         }
+        settings.HoverDelayMode = HoverDelayModes.Normalize(settings.HoverDelayMode);
+        if (settings.HoverCustomDelayMs is < HoverDelayModes.MinimumCustomMilliseconds or > HoverDelayModes.MaximumCustomMilliseconds)
+            settings.HoverCustomDelayMs = HoverDelayModes.DefaultCustomMilliseconds;
 
         settings.LanDevices ??= [];
         settings.LanDevices.RemoveAll(d => string.IsNullOrWhiteSpace(d.LastAddress) && string.IsNullOrWhiteSpace(d.MdnsName));

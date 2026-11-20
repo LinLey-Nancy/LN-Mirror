@@ -83,6 +83,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
         _hoverWatcher = new MirrorHoverWatcher(() => _window.GetContentRect());
         _hoverWatcher.HoverChanged += OnHoverChanged;
+        ApplyHoverDelay();
 
         foreach (var entry in settings.LanDevices.OrderByDescending(d => d.LastConnectedAt))
         {
@@ -253,6 +254,36 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     /// <summary>悬停显示模式下，鼠标此刻是否正落在画面范围内。</summary>
     public bool HoverRevealActive => _hoverRevealActive;
+
+    public int HoverCustomDelayMs => _settings.HoverCustomDelayMs;
+
+    public string HoverDelayLabel => _settings.HoverDelayMode switch
+    {
+        HoverDelayModes.Off => "关闭",
+        HoverDelayModes.OneSecond => "1 s",
+        HoverDelayModes.TwoSeconds => "2 s",
+        HoverDelayModes.Custom => $"自定义 · {HoverCustomDelayMs / 1000m:0.###} s",
+        _ => "智能",
+    };
+
+    public void SetHoverDelay(string mode, int? customMilliseconds = null)
+    {
+        mode = HoverDelayModes.Normalize(mode);
+        int milliseconds = customMilliseconds ?? HoverCustomDelayMs;
+        if (milliseconds is < HoverDelayModes.MinimumCustomMilliseconds or > HoverDelayModes.MaximumCustomMilliseconds)
+            return;
+        if (_settings.HoverDelayMode == mode && HoverCustomDelayMs == milliseconds) return;
+
+        _settings.HoverDelayMode = mode;
+        _settings.HoverCustomDelayMs = milliseconds;
+        ApplyHoverDelay();
+        SaveSettings();
+        OnPropertyChanged(nameof(HoverDelayLabel));
+    }
+
+    private void ApplyHoverDelay()
+        => _hoverWatcher.SetDelay(HoverDelayModes.GetMilliseconds(_settings.HoverDelayMode, HoverCustomDelayMs),
+            _settings.HoverDelayMode == HoverDelayModes.Smart);
 
     /// <summary>不透明度滑块的标题：悬停显示时它决定的是"显示出来时"的不透明度。</summary>
     public string OpacityLabel => _hoverRevealEnabled ? "悬停显示" : "不透明度";
@@ -1421,17 +1452,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         _settings.HoverRevealEnabled = value;
         SaveSettings();
 
-        if (value)
-        {
-            _hoverWatcher.Start();
-            // 打开的瞬间先按鼠标当前位置判断一次，避免画面闪一下
-            _hoverRevealActive = _hoverWatcher.IsInside;
-        }
-        else
-        {
-            _hoverWatcher.Stop();
-            _hoverRevealActive = false;
-        }
+        _hoverRevealActive = false;
+        if (value && IsConnected) _hoverWatcher.Start();
+        else _hoverWatcher.Stop();
 
         ApplyEffectiveOpacity();
 

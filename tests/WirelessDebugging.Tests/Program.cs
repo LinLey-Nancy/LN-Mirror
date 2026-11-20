@@ -6,6 +6,7 @@ using LNMirror.Core.Adb;
 using LNMirror.Core.Configuration;
 using LNMirror.Core.Devices;
 using LNMirror.Core.Scrcpy;
+using LNMirror.Core.Windowing;
 
 const string connectAdvertisement = "adb-phone-TnSdi9 _adb-tls-connect._tcp 192.0.2.10:33015";
 const string pairAdvertisement = "adb-phone-QXjCrW _adb-tls-pairing._tcp 192.0.2.10:33861";
@@ -57,6 +58,49 @@ SettingsStore.ReadOnly = true;
 
 var cases = new (string Name, Action Check)[]
 {
+    ("智能悬停忽略路过的指针，停稳后显示并在离开时隐藏", () =>
+    {
+        var watcher = new MirrorHoverWatcher(() => null);
+        var shown = false;
+        watcher.HoverChanged += value => shown = value;
+        SampleHover(watcher, 20, 0);
+        SampleHover(watcher, 60, 300);
+        SampleHover(watcher, 62, 600);
+        Require(!shown);
+        SampleHover(watcher, 65, 650);
+        Require(shown);
+        SampleHover(watcher, 130, 660);
+        Require(!shown);
+    }),
+    ("固定悬停延迟在离开后重新计时，关闭延迟立即显示", () =>
+    {
+        var watcher = new MirrorHoverWatcher(() => null);
+        var shown = false;
+        watcher.HoverChanged += value => shown = value;
+        SetHoverDelay(watcher, 1000, false);
+        SampleHover(watcher, 20, 0);
+        SampleHover(watcher, 130, 800);
+        SampleHover(watcher, 25, 900);
+        SampleHover(watcher, 70, 1800);
+        Require(!shown);
+        SampleHover(watcher, 75, 1900);
+        Require(shown);
+        SampleHover(watcher, 130, 2000);
+        SetHoverDelay(watcher, 0, false);
+        SampleHover(watcher, 30, 2010);
+        Require(shown);
+    }),
+    ("关闭悬停延迟后可重新选回智能，默认设置显示智能", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        Require(controller.HoverDelayLabel == "智能");
+        controller.SetHoverDelay(HoverDelayModes.Off);
+        Require(controller.HoverDelayLabel == "关闭");
+        controller.SetHoverDelay(HoverDelayModes.Smart);
+        Require(controller.HoverDelayLabel == "智能");
+        controller.SetHoverDelay(HoverDelayModes.Custom, 1250);
+        Require(controller.HoverCustomDelayMs == 1250 && controller.HoverDelayLabel.StartsWith("自定义"));
+    }),
     ("同型号的不同设备不会被去重", () =>
     {
         using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
@@ -421,6 +465,18 @@ static void ApplySnapshot(AppController controller, params string[] advertisemen
 static void Require(bool condition)
 {
     if (!condition) throw new InvalidOperationException("结果与预期不符");
+}
+
+static void SampleHover(MirrorHoverWatcher watcher, int x, long now)
+{
+    var sample = typeof(MirrorHoverWatcher).GetMethod("ObservePointer", BindingFlags.Instance | BindingFlags.NonPublic);
+    Require(sample is not null);
+    sample!.Invoke(watcher, [new WindowRect(0, 0, 100, 100), x, 50, now]);
+}
+
+static void SetHoverDelay(MirrorHoverWatcher watcher, int milliseconds, bool requireStillness)
+{
+    watcher.SetDelay(milliseconds, requireStillness);
 }
 
 static void ApplySessionOutput(AppController controller, ScrcpySession session, string line)

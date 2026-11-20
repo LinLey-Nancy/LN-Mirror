@@ -1,6 +1,7 @@
 <Window x:Class="LNMirror.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:config="clr-namespace:LNMirror.Core.Configuration"
         Title="LN-Mirror"
         Width="1092.5" Height="732.5" MinWidth="840" MinHeight="530"
         Icon="/LN-Mirror;component/Assets/app.png"
@@ -318,6 +319,51 @@
                                     <StackPanel>
                                         <CheckBox Content="鼠标悬停时显示画面" IsChecked="{Binding HoverRevealEnabled}" Style="{StaticResource CenterSettingCheck}"
                                                   ToolTip="鼠标移出时隐藏画面，移入时按设定的不透明度显示"/>
+                                        <DockPanel Visibility="{Binding HoverRevealEnabled, Converter={StaticResource BoolToVis}}" Margin="0,5">
+                                            <TextBlock Text="悬停显示延迟" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <Grid HorizontalAlignment="Right">
+                                                <ToggleButton x:Name="HoverDelayToggle" Width="142" MinHeight="30" Padding="8,3"
+                                                              AutomationProperties.Name="悬停显示延迟">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="{Binding HoverDelayLabel}"/>
+                                                        <TextBlock Text="▾" Margin="7,0,0,0"/>
+                                                    </StackPanel>
+                                                </ToggleButton>
+                                                <Popup x:Name="HoverDelayPopup" PlacementTarget="{Binding ElementName=HoverDelayToggle}"
+                                                       Placement="Bottom" StaysOpen="False"
+                                                       IsOpen="{Binding IsChecked, ElementName=HoverDelayToggle, Mode=TwoWay}"
+                                                       Opened="OnHoverDelayPopupOpened" Closed="OnHoverDelayPopupClosed">
+                                                    <Border MinWidth="142" Padding="4" Background="{StaticResource CenterSurface}"
+                                                            BorderBrush="{StaticResource CenterControlLine}" BorderThickness="1">
+                                                        <StackPanel PreviewKeyDown="OnHoverDelayPopupKeyDown" KeyboardNavigation.TabNavigation="Cycle">
+                                                            <StackPanel.Resources>
+                                                                <Style TargetType="Button" BasedOn="{StaticResource CenterAction}">
+                                                                    <Setter Property="HorizontalContentAlignment" Value="Left"/>
+                                                                </Style>
+                                                            </StackPanel.Resources>
+                                                            <Button x:Name="HoverDelayOff" Content="关闭" Tag="{x:Static config:HoverDelayModes.Off}"
+                                                                    Click="OnHoverDelayPresetClick" ToolTip="鼠标移入时立即显示"/>
+                                                            <Button Content="智能" Tag="{x:Static config:HoverDelayModes.Smart}"
+                                                                    Click="OnHoverDelayPresetClick" ToolTip="鼠标停稳约 350 毫秒后显示"/>
+                                                            <Button Content="1 s" Tag="{x:Static config:HoverDelayModes.OneSecond}" Click="OnHoverDelayPresetClick"/>
+                                                            <Button Content="2 s" Tag="{x:Static config:HoverDelayModes.TwoSeconds}" Click="OnHoverDelayPresetClick"/>
+                                                            <Button x:Name="HoverDelayCustom" Content="自定义" Click="OnHoverDelayCustomClick"/>
+                                                            <Grid x:Name="HoverDelayEditor" Margin="3" Visibility="Collapsed">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*"/>
+                                                                    <ColumnDefinition Width="Auto"/>
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBox x:Name="HoverDelayInput" AutomationProperties.Name="自定义悬停延迟（秒）"
+                                                                         ToolTip="0.1–60 秒，可输入小数。按回车或点击菜单外保存。"/>
+                                                                <TextBlock Text="秒" Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                                            </Grid>
+                                                            <TextBlock x:Name="HoverDelayError" Text="请输入 0.1–60 秒" Style="{StaticResource CenterNote}"
+                                                                       Margin="3" Visibility="Collapsed"/>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </Popup>
+                                            </Grid>
+                                        </DockPanel>
                                         <DockPanel Visibility="{Binding HoverRevealEnabled, Converter={StaticResource BoolToVis}}" Margin="0,5">
                                             <TextBlock Text="隐藏时的位置提示" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                             <ComboBox ItemsSource="{Binding HoverRevealHintOptions}" DisplayMemberPath="DisplayName"
