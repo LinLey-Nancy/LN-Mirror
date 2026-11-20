@@ -553,9 +553,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (AllowAutoReconnect && LanAutoReconnect && _settings.PreferredSerial is { } preferred
             && AdbDevice.IsWirelessSerial(preferred))
         {
-            var target = WirelessTarget.FromSerial(preferred, MdnsServices);
-            var history = FindLanHistory(target);
-            if (history is not null) target = TargetFromHistory(history);
+            var history = FindPreferredHistory(preferred);
+            var target = history is null ? WirelessTarget.FromSerial(preferred, MdnsServices) : TargetFromHistory(history);
             _ = ReconnectAsync(preferred, target, startup: true);
         }
     }
@@ -961,7 +960,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (entry is null) return Task.CompletedTask;
 
         if (_settings.PreferredSerial is { } preferred && AdbDevice.IsWirelessSerial(preferred)
-            && ReferenceEquals(FindLanHistory(WirelessTarget.FromSerial(preferred, MdnsServices)), entry))
+            && ReferenceEquals(FindPreferredHistory(preferred), entry))
         {
             CancelReconnect();
             _settings.PreferredSerial = null;
@@ -976,6 +975,16 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private static WirelessTarget TargetFromHistory(LanDeviceEntry entry)
         => new(entry.LastAddress, string.IsNullOrWhiteSpace(entry.MdnsName) ? null : entry.MdnsName);
 
+    private LanDeviceEntry? FindPreferredHistory(string serial)
+    {
+        var instance = AdbDevice.GetMdnsInstanceName(serial);
+        return _settings.LanDevices.Where(entry => instance is null
+                ? string.Equals(entry.LastAddress, serial, StringComparison.OrdinalIgnoreCase)
+                : string.Equals(entry.MdnsName, instance, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(entry => entry.LastConnectedAt)
+            .FirstOrDefault();
+    }
+
     private LanDeviceEntry? FindLanHistory(WirelessTarget target)
     {
         if (target.InstanceName is { } name)
@@ -983,7 +992,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 string.Equals(d.MdnsName, name, StringComparison.OrdinalIgnoreCase));
 
         return _settings.LanDevices.FirstOrDefault(d =>
-            string.Equals(d.LastAddress, target.Address, StringComparison.OrdinalIgnoreCase));
+            string.IsNullOrEmpty(d.MdnsName) && string.Equals(d.LastAddress, target.Address, StringComparison.OrdinalIgnoreCase));
     }
 
     private void UpdateLanHistory(AdbDevice device, WirelessTarget target)

@@ -89,6 +89,27 @@ var cases = new (string Name, Action Check)[]
         controller.ConnectHistoryAsync(entry).GetAwaiter().GetResult();
         Require(controller.Notice.Contains("尚未发现"));
     }),
+    ("旧版首选地址被另一设备占用时仍按原历史记录移除", () =>
+    {
+        var original = new LanDeviceEntry { LastAddress = connectAddress, MdnsName = "adb-phone-TnSdi9" };
+        var settings = new AppSettings { PreferredSerial = connectAddress, LanDevices = [original] };
+        using var controller = new AppController(settings, Dispatcher.CurrentDispatcher);
+        var mdns = new MdnsMonitor(new AdbClient(Environment.ProcessPath!));
+        typeof(MdnsMonitor).GetProperty(nameof(MdnsMonitor.Current))!.SetValue(mdns,
+            MdnsServicesParser.Parse(connectAdvertisement.Replace("adb-phone-TnSdi9", "adb-replacement-TnSdi9")));
+        SetControllerField(controller, "_mdns", mdns);
+        controller.RemoveHistoryAsync(original).GetAwaiter().GetResult();
+        Require(settings.PreferredSerial is null && settings.LanDevices.Count == 0);
+    }),
+    ("自动重连等待期间可以取消", () =>
+    {
+        using var controller = new AppController(new AppSettings { LanAutoReconnect = true }, Dispatcher.CurrentDispatcher);
+        var reconnect = typeof(AppController).GetMethod("ReconnectAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var task = (Task)reconnect.Invoke(controller, ["test-serial", null, false, null])!;
+        Require(controller.CanDisconnect && !controller.IsBusy);
+        controller.DisconnectAsync().GetAwaiter().GetResult();
+        Require(task.Wait(TimeSpan.FromSeconds(2)) && !controller.CanDisconnect);
+    }),
     ("取消连接能中止尚未创建 scrcpy 会话的 ADB 操作", () =>
     {
         using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
