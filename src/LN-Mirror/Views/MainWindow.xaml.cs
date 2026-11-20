@@ -128,13 +128,19 @@ public partial class MainWindow : Window
         _pairingReturnFocus = null;
     }
 
-    private void OnClosePairingClick(object sender, RoutedEventArgs e) => ClosePairing();
+    private async void OnClosePairingClick(object sender, RoutedEventArgs e) => await CancelPairingAsync();
 
-    private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
+    private async void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (PairingOverlay.Visibility != Visibility.Visible || e.Key != Key.Escape) return;
-        if (!_pairingInProgress) ClosePairing();
         e.Handled = true;
+        await CancelPairingAsync();
+    }
+
+    private async Task CancelPairingAsync()
+    {
+        if (_pairingInProgress) await _controller.DisconnectAsync();
+        ClosePairing();
     }
 
     private void OnHoverDelayPopupOpened(object sender, EventArgs e) => HoverDelayOff.Focus();
@@ -228,7 +234,7 @@ public partial class MainWindow : Window
         if (_pairingInProgress) return;
 
         _pairingInProgress = true;
-        PairFields.IsEnabled = PairSubmitButton.IsEnabled = PairCloseButton.IsEnabled = CancelPairButton.IsEnabled = false;
+        PairFields.IsEnabled = PairSubmitButton.IsEnabled = false;
         PairingMessage.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "CenterMuted");
         PairingMessage.Text = "正在配对并连接…";
         PairingMessage.Visibility = Visibility.Visible;
@@ -239,11 +245,12 @@ public partial class MainWindow : Window
         finally
         {
             PairCodeBox.Clear();
-            PairFields.IsEnabled = PairSubmitButton.IsEnabled = PairCloseButton.IsEnabled = CancelPairButton.IsEnabled = true;
+            PairFields.IsEnabled = PairSubmitButton.IsEnabled = true;
             _pairingInProgress = false;
         }
 
         ApplyPhaseVisual();
+        if (PairingOverlay.Visibility != Visibility.Visible) return;
         if (_controller.IsConnected)
         {
             ClosePairing();
