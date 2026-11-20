@@ -8,9 +8,9 @@ namespace LNMirror.Core.Scrcpy;
 
 public sealed record QualityProfile(string Key, string DisplayName, int MaxSize, int MaxFps, string BitRate)
 {
-    public string Summary => $"长边 {MaxSize} · 最高 {MaxFps} FPS · {BitRate}";
+    public string Summary => $"长边上限 {MaxSize} · 最高 {MaxFps} FPS · 目标码率 {BitRate}bps";
 
-    public static readonly QualityProfile WirelessLowLoad = new(QualityNames.WirelessLowLoad, "无线低负载", 1024, 30, "3M");
+    public static readonly QualityProfile WirelessLowLoad = new(QualityNames.WirelessLowLoad, "低负载", 1024, 30, "3M");
     public static readonly QualityProfile Smooth = new(QualityNames.Smooth, "流畅", 1280, 60, "4M");
     public static readonly QualityProfile Balanced = new(QualityNames.Balanced, "均衡（默认）", 1920, 60, "8M");
     public static readonly QualityProfile Sharp = new(QualityNames.Sharp, "清晰", 1920, 60, "12M");

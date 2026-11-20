@@ -315,8 +315,13 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public (int Width, int Height)? VideoSize
     {
         get => _videoSize;
-        private set => Set(ref _videoSize, value);
+        private set
+        {
+            if (Set(ref _videoSize, value)) OnPropertyChanged(nameof(VideoSizeText));
+        }
     }
+
+    public string VideoSizeText => _videoSize is { } size ? $"{size.Width}×{size.Height}" : "—";
 
     public string FpsText => _fps is null ? "—" : $"{_fps:0.0}";
 
@@ -1276,11 +1281,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 if (!ReferenceEquals(_session, source)) return;
                 Fps = sample.RenderedFps;
                 Set(ref _skippedFrames, (_skippedFrames ?? 0) + sample.SkippedFrames, nameof(SkippedFramesText));
-                var rect = _window.GetRect();
-                if (rect is not null)
-                {
-                    WindowInfo = $"{rect.Value.Width}×{rect.Value.Height}";
-                }
+                UpdateStatusDetail();
             });
         }
 
@@ -1296,7 +1297,6 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 if (ReferenceEquals(_session, source)) VideoSize = (tw, th);
             });
         }
-
     }
 
     private void ResetSessionDiagnostics()

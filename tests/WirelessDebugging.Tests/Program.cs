@@ -211,6 +211,16 @@ var cases = new (string Name, Action Check)[]
         Require(ScrcpyFrameSample.TryParse("INFO: 48 fps (+12 frames skipped)", out var sample));
         Require(sample.RenderedFps == 48 && sample.SkippedFrames == 12);
     }),
+    ("诊断分别显示视频尺寸与桌面窗口尺寸", () =>
+    {
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        using var controller = new AppController(new AppSettings(), dispatcher);
+        using var session = new ScrcpySession(ScrcpyRuntime.Discover()!);
+        SetControllerField(controller, "_session", session);
+        ApplySessionOutput(controller, session, "INFO: Texture (D3D11VA): 576x1280");
+        dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+        Require(controller.VideoSizeText == "576×1280" && controller.WindowInfo == "—");
+    }),
     ("静态画面零帧是有效样本", () =>
     {
         Require(ScrcpyFrameSample.TryParse("INFO: 0 fps", out var sample));

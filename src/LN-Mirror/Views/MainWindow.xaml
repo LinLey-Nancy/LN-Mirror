@@ -361,7 +361,7 @@
                                               AutomationProperties.Name="无线画面缓冲（毫秒）"/>
                                     <TextBlock Text="无线画面缓冲（ms）" VerticalAlignment="Center"/>
                                 </DockPanel>
-                                <CheckBox Content="投屏时保持手机常亮" IsChecked="{Binding KeepAwake}" Style="{StaticResource CenterSettingCheck}"/>
+                                <CheckBox Content="投屏时保持手机常亮（需供电）" IsChecked="{Binding KeepAwake}" Style="{StaticResource CenterSettingCheck}"/>
                                 <CheckBox Content="断线后自动重连" IsChecked="{Binding LanAutoReconnect}" Style="{StaticResource CenterSettingCheck}"
                                           ToolTip="适用于 USB 和无线连接，含启动时恢复上次无线投屏"/>
                                 <TextBlock Text="画质、无线缓冲、渲染和常亮在连接时生效。" Style="{StaticResource CenterNote}" Margin="0,4,0,0"/>
@@ -411,11 +411,12 @@
                                         <TextBlock Text="{Binding FpsText}" FontWeight="SemiBold" Margin="0,4,0,0"/>
                                         <TextBlock Text="{Binding SkippedFramesText, StringFormat='累计跳过 {0} 帧'}"
                                                    Style="{StaticResource CenterNote}" TextWrapping="Wrap"
-                                                   ToolTip="本次会话中由 scrcpy 跳过的帧数。"/>
+                                                   ToolTip="本次会话中，电脑端待显示帧被后续帧覆盖的次数。"/>
                                     </StackPanel>
                                     <StackPanel Margin="0,0,8,0">
-                                        <TextBlock Text="画面尺寸" Style="{StaticResource CenterNote}"/>
-                                        <TextBlock Text="{Binding WindowInfo}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                        <TextBlock Text="视频尺寸" Style="{StaticResource CenterNote}"/>
+                                        <TextBlock Text="{Binding VideoSizeText}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                        <TextBlock Text="{Binding WindowInfo, StringFormat='窗口 {0}'}" Style="{StaticResource CenterNote}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <StackPanel Margin="0,0,8,0">
                                         <TextBlock Text="不透明度" Style="{StaticResource CenterNote}"/>
@@ -426,7 +427,7 @@
                                         <TextBlock Text="{Binding TopmostText}" FontWeight="SemiBold" Margin="0,4,0,0"/>
                                     </StackPanel>
                                 </UniformGrid>
-                                <TextBlock Text="{Binding SessionParameters, StringFormat='会话参数  {0}'}"
+                                <TextBlock Text="{Binding SessionParameters, StringFormat='启动参数  {0}'}"
                                            Style="{StaticResource CenterNote}" TextWrapping="Wrap" Margin="0,0,0,4"/>
                                 <TextBlock Text="{Binding StatusLine}" Style="{StaticResource CenterNote}" Margin="0,0,0,4"/>
                                 <DockPanel Margin="0,5,0,0">
