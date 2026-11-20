@@ -1,4 +1,5 @@
 using System.Windows.Threading;
+using LNMirror.Core.Configuration;
 using LNMirror.Core.Interop;
 
 namespace LNMirror.Core.Windowing;
@@ -11,11 +12,15 @@ namespace LNMirror.Core.Windowing;
 public sealed class MirrorHoverWatcher
 {
     private const int LeaveMargin = 6;
+    private const int SmartMovementTolerance = 8;
 
     private readonly DispatcherTimer _timer;
     private readonly Func<WindowRect?> _rectProvider;
-    private bool _inside;
-    private bool _running;
+    private bool _revealed;
+    private int _delayMilliseconds = HoverDelayModes.SmartMilliseconds;
+    private bool _requireStillness = true;
+    private long? _hoverStartedAt;
+    private (int X, int Y) _anchor;
 
     public MirrorHoverWatcher(Func<WindowRect?> rectProvider, TimeSpan? interval = null)
     {
@@ -24,59 +29,67 @@ public sealed class MirrorHoverWatcher
         _timer.Tick += (_, _) => Tick();
     }
 
-    /// <summary>鼠标当前是否落在画面范围内。</summary>
-    public bool IsInside => _inside;
-
-    /// <summary>进入/离开画面范围时触发，参数为进入后的状态。</summary>
+    /// <summary>达到显示条件或离开画面时触发。</summary>
     public event Action<bool>? HoverChanged;
 
-    public void Start()
+    public void SetDelay(int milliseconds, bool requireStillness)
     {
-        if (_running) return;
-        _running = true;
-        _timer.Start();
+        _delayMilliseconds = milliseconds;
+        _requireStillness = requireStillness;
+        _hoverStartedAt = null;
     }
+
+    public void Start() => _timer.Start();
 
     public void Stop()
     {
-        if (!_running) return;
-        _running = false;
         _timer.Stop();
-        SetInside(false);
+        _hoverStartedAt = null;
+        SetRevealed(false);
     }
 
     private void Tick()
     {
         var rect = _rectProvider();
+        if (!NativeMethods.GetCursorPos(out var cursor)) rect = null;
+        ObservePointer(rect, cursor.X, cursor.Y, Environment.TickCount64);
+    }
+
+    private void ObservePointer(WindowRect? rect, int x, int y, long now)
+    {
         if (rect is null || rect.Value.IsEmpty)
         {
-            SetInside(false);
+            _hoverStartedAt = null;
+            SetRevealed(false);
             return;
         }
 
-        NativeMethods.GetCursorPos(out var cursor);
         var r = rect.Value;
-
-        bool inside;
-        if (_inside)
+        int margin = _revealed ? LeaveMargin : 0;
+        bool within = x >= r.Left - margin && x <= r.Right + margin
+            && y >= r.Top - margin && y <= r.Bottom + margin;
+        if (!within)
         {
-            // 已经进入时用外扩一圈的边界，光标停在边缘也不会来回闪
-            inside = cursor.X >= r.Left - LeaveMargin && cursor.X <= r.Right + LeaveMargin
-                  && cursor.Y >= r.Top - LeaveMargin && cursor.Y <= r.Bottom + LeaveMargin;
+            _hoverStartedAt = null;
+            SetRevealed(false);
+            return;
         }
-        else
+        if (_revealed) return;
+
+        if (_hoverStartedAt is null || (_requireStillness
+            && (Math.Abs(x - _anchor.X) > SmartMovementTolerance || Math.Abs(y - _anchor.Y) > SmartMovementTolerance)))
         {
-            inside = cursor.X >= r.Left && cursor.X <= r.Right
-                  && cursor.Y >= r.Top && cursor.Y <= r.Bottom;
+            _hoverStartedAt = now;
+            _anchor = (x, y);
         }
 
-        SetInside(inside);
+        if (now - _hoverStartedAt >= _delayMilliseconds) SetRevealed(true);
     }
 
-    private void SetInside(bool value)
+    private void SetRevealed(bool value)
     {
-        if (_inside == value) return;
-        _inside = value;
+        if (_revealed == value) return;
+        _revealed = value;
         HoverChanged?.Invoke(value);
     }
 }

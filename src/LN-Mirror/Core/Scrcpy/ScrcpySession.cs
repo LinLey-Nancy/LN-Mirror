@@ -19,7 +19,7 @@ public sealed class ScrcpySession : IDisposable
 
     private readonly ScrcpyRuntime _runtime;
     private Process? _process;
-    private int _exitCode = -1;
+    private string? _lastErrorLine;
     private bool _disposed;
 
     public ScrcpySession(ScrcpyRuntime runtime)
@@ -33,14 +33,17 @@ public sealed class ScrcpySession : IDisposable
 
     public bool IsRunning => _process is { HasExited: false };
 
+    public string? LastErrorLine => Volatile.Read(ref _lastErrorLine);
+
     /// <summary>scrcpy 输出行（标准输出与错误合并）。</summary>
-    public event Action<string>? OutputLine;
+    public event Action<ScrcpySession, string>? OutputLine;
 
     /// <summary>进程退出，参数为退出码。</summary>
-    public event Action<int>? Exited;
+    public event Action<ScrcpySession, int>? Exited;
 
     public async Task<bool> StartAsync(ScrcpyStartOptions options, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         var args = ScrcpyRuntime.BuildArguments(options);
 
         var psi = new ProcessStartInfo
@@ -82,13 +85,12 @@ public sealed class ScrcpySession : IDisposable
         }
 
         _process = process;
-        _exitCode = -1;
 
         process.Exited += OnProcessExited;
         _ = PumpAsync(process.StandardOutput, "输出");
         _ = PumpAsync(process.StandardError, "错误");
 
-        WindowHandle = await WaitForWindowAsync(process.Id, ct).ConfigureAwait(true);
+        WindowHandle = await WaitForWindowAsync(process, ct).ConfigureAwait(true);
 
         if (WindowHandle != IntPtr.Zero)
         {
@@ -106,7 +108,7 @@ public sealed class ScrcpySession : IDisposable
         return WindowHandle != IntPtr.Zero;
     }
 
-    public void Stop()
+    private void Stop()
     {
         var process = _process;
         if (process is null) return;
@@ -120,18 +122,11 @@ public sealed class ScrcpySession : IDisposable
             }
 
             // 优先关闭它自己的画面窗口，让 scrcpy 走正常的清理流程（移除手机端 server、恢复设备状态）
-            bool closed = false;
-            if (WindowHandle != IntPtr.Zero && NativeMethods.IsWindow(WindowHandle))
-            {
-                NativeMethods.PostMessageW(WindowHandle, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-                closed = process.WaitForExit((int)StopTimeout.TotalMilliseconds);
-            }
-
-            if (!closed)
-            {
-                process.CloseMainWindow();
-                closed = process.WaitForExit(2000);
-            }
+            var notified = WindowHandle != IntPtr.Zero && NativeMethods.IsWindow(WindowHandle)
+                && NativeMethods.PostMessageW(WindowHandle, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+            bool closed = notified
+                ? process.WaitForExit((int)StopTimeout.TotalMilliseconds)
+                : process.CloseMainWindow() && process.WaitForExit(2000);
 
             if (!closed)
             {
@@ -173,9 +168,8 @@ public sealed class ScrcpySession : IDisposable
             code = -1;
         }
 
-        _exitCode = code;
         AppLog.Info($"[会话] scrcpy 进程结束，退出码 {code}");
-        Exited?.Invoke(code);
+        Exited?.Invoke(this, code);
     }
 
     private async Task PumpAsync(StreamReader reader, string channel)
@@ -185,8 +179,10 @@ public sealed class ScrcpySession : IDisposable
             while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
             {
                 if (line.Length == 0) continue;
+                if (line.Contains("ERROR", StringComparison.OrdinalIgnoreCase))
+                    Volatile.Write(ref _lastErrorLine, line.Trim());
                 AppLog.Debug($"[scrcpy {channel}] {line}");
-                OutputLine?.Invoke(line);
+                OutputLine?.Invoke(this, line);
             }
         }
         catch
@@ -195,8 +191,9 @@ public sealed class ScrcpySession : IDisposable
         }
     }
 
-    private async Task<IntPtr> WaitForWindowAsync(int processId, CancellationToken ct)
+    private static async Task<IntPtr> WaitForWindowAsync(Process process, CancellationToken ct)
     {
+        int processId = process.Id;
         var deadline = Environment.TickCount64 + (long)WindowWaitTimeout.TotalMilliseconds;
 
         while (Environment.TickCount64 < deadline)
@@ -206,9 +203,9 @@ public sealed class ScrcpySession : IDisposable
             var handle = FindMirrorWindow(processId);
             if (handle != IntPtr.Zero) return handle;
 
-            if (_process is { HasExited: true }) return IntPtr.Zero;
+            if (process.HasExited) return IntPtr.Zero;
 
-            await Task.Delay(120).ConfigureAwait(false);
+            await Task.Delay(120, ct).ConfigureAwait(false);
         }
 
         return IntPtr.Zero;

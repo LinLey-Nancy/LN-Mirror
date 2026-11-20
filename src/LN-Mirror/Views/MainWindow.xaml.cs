@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
@@ -17,6 +18,7 @@ public partial class MainWindow : Window
     private bool _pairingInProgress;
     private IInputElement? _pairingReturnFocus;
     private int _logUpdatePending;
+    private bool _editingHoverDelay;
 
     public MainWindow(AppController controller, TrayIconService tray)
     {
@@ -60,7 +62,7 @@ public partial class MainWindow : Window
             ConnectionPhase.Unauthorized => "请解锁手机，在弹窗中允许这台电脑。",
             ConnectionPhase.Offline => _controller.SelectedDeviceStateText,
             ConnectionPhase.Failed => _controller.StatusLine,
-            ConnectionPhase.Connected => _controller.SelectedDeviceText,
+            ConnectionPhase.Connected => _controller.ConnectedDeviceText,
             _ => string.Empty,
         };
         ConnectionDetail.Visibility = string.IsNullOrWhiteSpace(ConnectionDetail.Text)
@@ -126,13 +128,89 @@ public partial class MainWindow : Window
         _pairingReturnFocus = null;
     }
 
-    private void OnClosePairingClick(object sender, RoutedEventArgs e) => ClosePairing();
+    private async void OnClosePairingClick(object sender, RoutedEventArgs e) => await CancelPairingAsync();
 
-    private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
+    private async void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (PairingOverlay.Visibility != Visibility.Visible || e.Key != Key.Escape) return;
-        if (!_pairingInProgress) ClosePairing();
         e.Handled = true;
+        await CancelPairingAsync();
+    }
+
+    private async Task CancelPairingAsync()
+    {
+        if (_pairingInProgress) await _controller.DisconnectAsync();
+        ClosePairing();
+    }
+
+    private void OnHoverDelayPopupOpened(object sender, EventArgs e) => HoverDelayOff.Focus();
+
+    private void OnHoverDelayPresetClick(object sender, RoutedEventArgs e)
+    {
+        _editingHoverDelay = false;
+        _controller.SetHoverDelay((string)((FrameworkElement)sender).Tag);
+        HoverDelayToggle.IsChecked = false;
+        HoverDelayToggle.Focus();
+    }
+
+    private void OnHoverDelayCustomClick(object sender, RoutedEventArgs e)
+    {
+        _editingHoverDelay = true;
+        HoverDelayCustom.Visibility = Visibility.Collapsed;
+        HoverDelayEditor.Visibility = Visibility.Visible;
+        HoverDelayInput.Text = (_controller.HoverCustomDelayMs / 1000m).ToString("0.###", CultureInfo.CurrentCulture);
+        HoverDelayInput.Focus();
+        HoverDelayInput.SelectAll();
+    }
+
+    private void OnHoverDelayPopupKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            _editingHoverDelay = false;
+        }
+        else if (e.Key == Key.Enter && _editingHoverDelay && HoverDelayInput.IsKeyboardFocusWithin)
+        {
+            e.Handled = true;
+            if (!SaveCustomHoverDelay())
+            {
+                HoverDelayError.Visibility = Visibility.Visible;
+                return;
+            }
+            _editingHoverDelay = false;
+        }
+        else
+        {
+            return;
+        }
+
+        e.Handled = true;
+        HoverDelayToggle.IsChecked = false;
+        HoverDelayToggle.Focus();
+    }
+
+    private void OnHoverDelayPopupClosed(object sender, EventArgs e)
+    {
+        if (_editingHoverDelay) SaveCustomHoverDelay();
+        _editingHoverDelay = false;
+        HoverDelayCustom.Visibility = Visibility.Visible;
+        HoverDelayEditor.Visibility = Visibility.Collapsed;
+        HoverDelayError.Visibility = Visibility.Collapsed;
+    }
+
+    private bool SaveCustomHoverDelay()
+    {
+        var text = HoverDelayInput.Text.Trim();
+        const NumberStyles style = NumberStyles.AllowDecimalPoint;
+        if (!decimal.TryParse(text, style, CultureInfo.CurrentCulture, out var seconds)
+            && !decimal.TryParse(text, style, CultureInfo.InvariantCulture, out seconds))
+            return false;
+        if (seconds < HoverDelayModes.MinimumCustomMilliseconds / 1000m
+            || seconds > HoverDelayModes.MaximumCustomMilliseconds / 1000m)
+            return false;
+
+        _controller.SetHoverDelay(HoverDelayModes.Custom, (int)Math.Round(seconds * 1000m));
+        return true;
     }
 
     private async void OnDiscoveredItemClick(object sender, RoutedEventArgs e)
@@ -156,7 +234,7 @@ public partial class MainWindow : Window
         if (_pairingInProgress) return;
 
         _pairingInProgress = true;
-        PairFields.IsEnabled = PairSubmitButton.IsEnabled = PairCloseButton.IsEnabled = CancelPairButton.IsEnabled = false;
+        PairFields.IsEnabled = PairSubmitButton.IsEnabled = false;
         PairingMessage.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "CenterMuted");
         PairingMessage.Text = "正在配对并连接…";
         PairingMessage.Visibility = Visibility.Visible;
@@ -167,11 +245,12 @@ public partial class MainWindow : Window
         finally
         {
             PairCodeBox.Clear();
-            PairFields.IsEnabled = PairSubmitButton.IsEnabled = PairCloseButton.IsEnabled = CancelPairButton.IsEnabled = true;
+            PairFields.IsEnabled = PairSubmitButton.IsEnabled = true;
             _pairingInProgress = false;
         }
 
         ApplyPhaseVisual();
+        if (PairingOverlay.Visibility != Visibility.Visible) return;
         if (_controller.IsConnected)
         {
             ClosePairing();
@@ -347,7 +426,7 @@ public partial class MainWindow : Window
 
     private void OnControllerPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(AppController.Phase) or nameof(AppController.IsBusy)
+        if (e.PropertyName is nameof(AppController.Phase) or nameof(AppController.IsBusy) or nameof(AppController.CanDisconnect)
             or nameof(AppController.IsLanMode) or nameof(AppController.SelectedDevice)
             or nameof(AppController.Opacity) or nameof(AppController.EffectiveOpacity)
             or nameof(AppController.OpacityStateText) or nameof(AppController.HoverRevealHint)

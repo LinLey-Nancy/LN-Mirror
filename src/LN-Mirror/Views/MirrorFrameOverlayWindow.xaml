@@ -12,12 +12,6 @@
         ShowActivated="False"
         Title="LN-Mirror 悬停边框">
 
-    <Window.Resources>
-        <Style TargetType="Border">
-            <Setter Property="Opacity" Value="0.35"/>
-        </Style>
-    </Window.Resources>
-
     <!--
       画面上方的覆盖层，三件事：
       1. 画面可见且鼠标移上去时，在四周显示拖动/缩放把手；
@@ -50,15 +44,15 @@
             <Rectangle Width="2" Height="20" Fill="#77909090" HorizontalAlignment="Left" VerticalAlignment="Top"/>
         </Grid>
 
-        <!-- 自绘定位点：系统箭头在画面上停稳后隐藏，用这个小点代替它 -->
-        <Canvas Grid.Row="0" Grid.Column="0" Grid.RowSpan="3" Grid.ColumnSpan="3" IsHitTestVisible="False">
-            <Ellipse x:Name="PointerDot" Width="9" Height="9" Stroke="#FFFFFFFF" StrokeThickness="1.5"
-                     Fill="#40000000" Visibility="Collapsed"/>
-        </Canvas>
-
         <!-- 拖动/缩放把手 -->
         <Grid x:Name="HandleLayer" Grid.Row="0" Grid.Column="0" Grid.RowSpan="3" Grid.ColumnSpan="3"
               Visibility="Collapsed">
+            <Grid.Resources>
+                <Style TargetType="Border">
+                    <Setter Property="Opacity" Value="0.35"/>
+                    <Setter Property="ForceCursor" Value="True"/>
+                </Style>
+            </Grid.Resources>
             <Grid.RowDefinitions>
                 <RowDefinition Height="14"/>
                 <RowDefinition Height="*"/>

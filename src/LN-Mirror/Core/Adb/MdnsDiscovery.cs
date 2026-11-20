@@ -21,8 +21,72 @@ public sealed record MdnsServiceInfo(string InstanceName, MdnsServiceKind Kind, 
     public string ActionText => Kind == MdnsServiceKind.Pairing ? "去配对" : IsAuthorized ? "连接" : "如何配对";
 }
 
+internal sealed record WirelessTarget(string? Address, string? InstanceName)
+{
+    public static WirelessTarget FromSerial(string serial, IReadOnlyList<MdnsServiceInfo> services)
+    {
+        if (AdbDevice.GetMdnsInstanceName(serial) is { } instance)
+            return new(null, instance);
+
+        return new(serial, WirelessDebuggingDiscovery.FindByAddress(services, serial)?.InstanceName);
+    }
+
+    public string? ResolveAddress(IReadOnlyList<MdnsServiceInfo> services)
+    {
+        if (InstanceName is null) return Address;
+        if (Address is not null && string.Equals(
+                WirelessDebuggingDiscovery.FindByAddress(services, Address)?.InstanceName,
+                InstanceName, StringComparison.OrdinalIgnoreCase))
+            return Address;
+
+        var service = WirelessDebuggingDiscovery.FindByInstance(services, InstanceName);
+        return service is not null && WirelessDebuggingDiscovery.FindByAddress(services, service.Address) is not null
+            ? service.Address
+            : null;
+    }
+
+    public bool Matches(AdbDevice device, string? resolvedAddress)
+        => (InstanceName is not null && string.Equals(InstanceName, AdbDevice.GetMdnsInstanceName(device.Serial),
+                StringComparison.OrdinalIgnoreCase))
+            || (resolvedAddress is not null && string.Equals(resolvedAddress, device.Serial, StringComparison.OrdinalIgnoreCase));
+
+    public AdbDevice? FindDevice(IReadOnlyList<AdbDevice> devices, string? address, bool preferAddress)
+    {
+        AdbDevice? alternate = null;
+        AdbDevice? unready = null;
+        foreach (var device in devices)
+        {
+            if (!Matches(device, address)) continue;
+            if (!device.IsReady)
+            {
+                unready = device;
+                continue;
+            }
+
+            bool matchesAddress = string.Equals(device.Serial, address, StringComparison.OrdinalIgnoreCase);
+            if (matchesAddress == preferAddress) return device;
+            alternate ??= device;
+        }
+        return alternate ?? unready;
+    }
+}
+
 internal static class WirelessDebuggingDiscovery
 {
+    public static MdnsServiceInfo? FindByAddress(IReadOnlyList<MdnsServiceInfo> services, string address)
+        => Unique(services.Where(s => s.Kind == MdnsServiceKind.Connect
+            && string.Equals(s.Address, address, StringComparison.OrdinalIgnoreCase)), s => s.InstanceName);
+
+    public static MdnsServiceInfo? FindByInstance(IReadOnlyList<MdnsServiceInfo> services, string instanceName)
+        => Unique(services.Where(s => s.Kind == MdnsServiceKind.Connect
+            && string.Equals(s.InstanceName, instanceName, StringComparison.OrdinalIgnoreCase)), s => s.Address);
+
+    private static MdnsServiceInfo? Unique(IEnumerable<MdnsServiceInfo> services, Func<MdnsServiceInfo, string> key)
+    {
+        var matches = services.DistinctBy(key, StringComparer.OrdinalIgnoreCase).Take(2).ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
     public static MdnsServiceInfo[] GetDeviceRows(IReadOnlyList<MdnsServiceInfo> services)
     {
         var replacedAddresses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -49,15 +113,9 @@ internal static class WirelessDebuggingDiscovery
             && string.Equals(GetHost(service.Address), host, StringComparison.OrdinalIgnoreCase));
 
         // ADB 的配对服务与连接服务可能各自带 mDNS 后缀。只有地址唯一时才按 IP 回退。
-        var exact = candidates.Where(service =>
-                string.Equals(service.InstanceName, pairingInstance, StringComparison.OrdinalIgnoreCase))
-            .DistinctBy(service => service.Address, StringComparer.OrdinalIgnoreCase)
-            .Take(2).ToArray();
-        if (exact.Length == 1) return exact[0];
-
-        var sameHost = candidates.DistinctBy(service => service.Address, StringComparer.OrdinalIgnoreCase)
-            .Take(2).ToArray();
-        return sameHost.Length == 1 ? sameHost[0] : null;
+        var exact = Unique(candidates.Where(service =>
+            string.Equals(service.InstanceName, pairingInstance, StringComparison.OrdinalIgnoreCase)), s => s.Address);
+        return exact ?? Unique(candidates, s => s.Address);
     }
 
     private static string GetHost(string address) => address[..address.LastIndexOf(':')];
@@ -104,6 +162,7 @@ public sealed class MdnsMonitor : IAsyncDisposable
 {
     private readonly AdbClient _adb;
     private readonly TimeSpan _interval;
+    private readonly SemaphoreSlim _refresh = new(1, 1);
     private CancellationTokenSource? _cts;
 
     public MdnsMonitor(AdbClient adb, TimeSpan? interval = null)
@@ -151,16 +210,26 @@ public sealed class MdnsMonitor : IAsyncDisposable
 
     private async Task PollAsync(CancellationToken ct)
     {
-        var result = await _adb.GetMdnsServicesAsync(ct).ConfigureAwait(false);
-        if (!result.Ok)
+        await _refresh.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            AppLog.Debug($"[发现] adb mdns services 退出码 {result.ExitCode}，本轮跳过");
-            return;
-        }
+            var result = await _adb.GetMdnsServicesAsync(ct).ConfigureAwait(false);
+            if (!result.Ok)
+            {
+                AppLog.Debug($"[发现] adb mdns services 退出码 {result.ExitCode}，本轮跳过");
+                return;
+            }
 
-        var services = MdnsServicesParser.Parse(result.StdOut);
-        Current = services;
-        SnapshotChanged?.Invoke(services);
+            var services = MdnsServicesParser.Parse(result.StdOut);
+            if (Current.SequenceEqual(services)) return;
+
+            Current = services;
+            SnapshotChanged?.Invoke(services);
+        }
+        finally
+        {
+            _refresh.Release();
+        }
     }
 
     public async ValueTask DisposeAsync()

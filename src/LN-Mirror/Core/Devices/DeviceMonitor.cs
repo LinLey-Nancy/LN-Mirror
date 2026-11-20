@@ -8,6 +8,8 @@ public sealed class DeviceMonitor : IAsyncDisposable
 {
     private readonly AdbClient _adb;
     private readonly TimeSpan _interval;
+    private readonly SemaphoreSlim _refresh = new(1, 1);
+    private long? _lastRefresh;
     private CancellationTokenSource? _cts;
     private readonly Dictionary<string, AdbDevice> _last = new(StringComparer.Ordinal);
 
@@ -45,17 +47,39 @@ public sealed class DeviceMonitor : IAsyncDisposable
             {
                 return;
             }
-            catch (Exception ex)
-            {
-                Failed?.Invoke(ex);
-            }
         }
     }
 
     private async Task PollAsync(CancellationToken ct)
     {
-        var devices = await _adb.GetDevicesAsync(ct).ConfigureAwait(false);
-        ApplySnapshot(devices);
+        try
+        {
+            await RefreshAsync(ct).ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            Failed?.Invoke(ex);
+        }
+    }
+
+    // 后台轮询和连接等待共享同一个快照。相邻请求复用刚完成的查询。
+    public async Task<IReadOnlyList<AdbDevice>> RefreshAsync(CancellationToken ct)
+    {
+        await _refresh.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_lastRefresh is { } last && Environment.TickCount64 - last < 300)
+                return Current;
+
+            var devices = await _adb.GetDevicesAsync(ct).ConfigureAwait(false);
+            if (!Current.SequenceEqual(devices)) ApplySnapshot(devices);
+            _lastRefresh = Environment.TickCount64;
+            return Current;
+        }
+        finally
+        {
+            _refresh.Release();
+        }
     }
 
     private void ApplySnapshot(IReadOnlyList<AdbDevice> devices)

@@ -6,11 +6,24 @@ namespace LNMirror.Core.Adb;
 
 public sealed record AdbDevice(string Serial, string State, string Model, string Product, string Device, string TransportId)
 {
+    internal const string MdnsSerialSuffix = "._adb-tls-connect._tcp";
+
     public bool IsReady => string.Equals(State, "device", StringComparison.OrdinalIgnoreCase);
 
     public bool IsUnauthorized => string.Equals(State, "unauthorized", StringComparison.OrdinalIgnoreCase);
 
     public bool IsOffline => string.Equals(State, "offline", StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsWirelessSerial(string serial)
+        => serial.Contains(':') || GetMdnsInstanceName(serial) is not null;
+
+    internal static string? GetMdnsInstanceName(string serial)
+    {
+        var name = serial.TrimEnd('.');
+        return name.Length > MdnsSerialSuffix.Length && name.EndsWith(MdnsSerialSuffix, StringComparison.OrdinalIgnoreCase)
+            ? name[..^MdnsSerialSuffix.Length]
+            : null;
+    }
 
     public string DisplayName => string.IsNullOrWhiteSpace(Model) ? Serial : $"{Model} · {Serial}";
 
@@ -54,6 +67,7 @@ public sealed class AdbClient
 
     public async Task<AdbResult> RunAsync(IEnumerable<string> args, CancellationToken ct, int timeoutMs = 20000, bool log = true)
     {
+        ct.ThrowIfCancellationRequested();
         var psi = new ProcessStartInfo
         {
             FileName = _adbPath,
@@ -82,11 +96,12 @@ public sealed class AdbClient
             return new AdbResult(-1, string.Empty, ex.Message);
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeoutMs);
+        // 退出应用时也要先终止本次 ADB 客户端，无需等待线程池继续执行。
+        using var stopRegistration = timeoutCts.Token.Register(static state => TryKill((Process)state!), process);
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+        var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
 
         try
         {
@@ -94,13 +109,18 @@ public sealed class AdbClient
         }
         catch (OperationCanceledException)
         {
-            TryKill(process);
+            await SafeReadAsync(stdoutTask).ConfigureAwait(false);
+            await SafeReadAsync(stderrTask).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
             if (log) AppLog.Warn($"[ADB] 命令超时（{timeoutMs / 1000} 秒）：{Describe(list)}");
-            return new AdbResult(-1, await SafeReadAsync(stdoutTask), "命令超时");
+            return new AdbResult(-1, string.Empty, "命令超时");
         }
 
         var stdout = await SafeReadAsync(stdoutTask);
         var stderr = await SafeReadAsync(stderrTask);
+        ct.ThrowIfCancellationRequested();
+        if (timeoutCts.IsCancellationRequested)
+            return new AdbResult(-1, string.Empty, "命令超时");
 
         if (log)
         {
@@ -121,6 +141,8 @@ public sealed class AdbClient
     public async Task<IReadOnlyList<AdbDevice>> GetDevicesAsync(CancellationToken ct)
     {
         var result = await RunAsync(["devices", "-l"], ct, timeoutMs: 15000, log: false).ConfigureAwait(false);
+        if (!result.Ok)
+            throw new IOException($"ADB 设备查询失败（{result.ExitCode}）：{FirstMeaningfulLine(result.StdErr) ?? "无错误详情"}");
         return ParseDevices(result.StdOut);
     }
 
@@ -233,14 +255,6 @@ public sealed class AdbClient
         return result;
     }
 
-    /// <summary>断开指定的局域网设备。</summary>
-    public async Task<AdbResult> DisconnectAsync(string address, CancellationToken ct)
-    {
-        var result = await RunAsync(["disconnect", address], ct).ConfigureAwait(false);
-        AppLog.Info($"[ADB] 断开局域网设备 {address}：{FirstMeaningfulLine(result.Combined) ?? result.ExitCode.ToString()}");
-        return result;
-    }
-
     /// <summary>查询 mDNS 发现到的无线调试服务（配对与可连接两种）。</summary>
     public async Task<AdbResult> GetMdnsServicesAsync(CancellationToken ct)
         => await RunAsync(["mdns", "services"], ct, timeoutMs: 15000, log: false).ConfigureAwait(false);
@@ -294,7 +308,7 @@ public sealed class AdbClient
     {
         try
         {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            if (!process.HasExited) process.Kill();
         }
         catch
         {

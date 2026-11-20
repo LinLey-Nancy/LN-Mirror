@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using LNMirror.Core;
 using LNMirror.Core.Configuration;
 using LNMirror.Core.Interop;
@@ -107,9 +107,10 @@ public static class SelfTest
         sb.AppendLine($"系统：{Environment.OSVersion.VersionString}（{(Environment.Is64BitProcess ? "x64" : "x86")}）");
         sb.AppendLine($"引擎：{controller.EngineText}");
         sb.AppendLine($"ADB：{controller.AdbVersionText}");
-        sb.AppendLine($"档位：{controller.QualitySummary}；渲染后端：{controller.RenderDriver}；无边框：{controller.Borderless}");
+        sb.AppendLine($"会话启动参数：{controller.SessionParameters}");
+        sb.AppendLine($"所选档位：{controller.QualitySummary} · 渲染设置：{controller.RenderDriver} · 无边框：{controller.Borderless}");
         sb.AppendLine($"状态：{controller.PhaseText} · {controller.StatusLine}");
-        sb.AppendLine($"画面：不透明度 {controller.Opacity}% · {(controller.PassThrough ? "鼠标穿透" : "操控手机")} · 置顶 {(controller.Topmost ? "开" : "关")} · 引擎帧率 {controller.FpsText} · 尺寸 {controller.WindowInfo}");
+        sb.AppendLine($"画面：不透明度 {controller.Opacity}% · {(controller.PassThrough ? "鼠标穿透" : "操控手机")} · 置顶 {(controller.Topmost ? "开" : "关")} · 渲染 FPS {controller.FpsText} · 显示前跳过帧 {controller.SkippedFramesText} · 视频尺寸 {controller.VideoSizeText} · 窗口尺寸 {controller.WindowInfo}");
         sb.AppendLine($"穿透验证：{controller.PassThroughCheck}");
 
         sb.AppendLine("设备：");

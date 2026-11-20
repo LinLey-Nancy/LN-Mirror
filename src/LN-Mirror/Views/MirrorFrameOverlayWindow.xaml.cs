@@ -12,41 +12,30 @@ using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 namespace LNMirror.Views;
 
 /// <summary>
-/// 画面上方的覆盖层，负责三件互不影响的事：
-/// 1. 画面可见且鼠标停在上面时，用自绘的小定位点代替系统箭头（停稳后隐藏箭头）；
-/// 2. 画面可见且鼠标停在上面一会儿后，在四周显示拖动/缩放把手（与"无边框"选项无关）；
-/// 3. 画面完全看不见时，按用户选择画一个位置提示（淡边框或角标）。
-/// 中间区域不渲染内容，点击直接穿透给 scrcpy。
+/// 画面上方的覆盖层负责拖动把手与隐藏时的位置提示。
+/// 中间区域点击穿透给 scrcpy。
 /// </summary>
 public partial class MirrorFrameOverlayWindow : Window
 {
-    /// <summary>指针停住多久后隐藏系统箭头，改用自绘定位点。</summary>
-    private const int HideCursorDelayMs = 150;
-
     /// <summary>指针停在画面上多久后出现拖动把手。太快出现会吃掉画面边缘的点击。</summary>
     private const int HandleDelayMs = 400;
 
     private readonly AppController _controller;
     private readonly DispatcherTimer _timer;
     private bool _dragging;
-    private bool _hoverRevealEnabled;
     private string _dragMode = "Move";
     private NativeMethods.POINT _dragStart;
     private WindowRect _startRect;
     private WindowRect _startContentRect;
 
-    private NativeMethods.POINT _lastCursor;
-    private long _stillSince;
     private long _insideSince = -1;
-    private bool _cursorHidden;
 
     public MirrorFrameOverlayWindow(AppController controller)
     {
         _controller = controller;
         InitializeComponent();
 
-        // 定位点要跟手，刷新要快；代价只是读一次光标坐标
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
         _timer.Tick += (_, _) => Tick();
         // 窗口首次 Show 之前没有句柄也不会触发 Loaded，必须在构造时就启动轮询
         _timer.Start();
@@ -72,63 +61,23 @@ public partial class MirrorFrameOverlayWindow : Window
 
         var settings = _controller.Settings;
         bool connected = _controller.IsConnected;
-        _hoverRevealEnabled = _controller.HoverRevealEnabled;
 
         // 画面范围取客户区，系统标题栏不算画面
         var rect = connected ? _controller.Window.GetContentRect() : null;
         if (rect is null || rect.Value.IsEmpty)
         {
             HideAll();
-            RestoreCursor();
             return;
         }
 
-        NativeMethods.GetCursorPos(out var cursor);
+        bool pictureVisible = _controller.EffectiveOpacity > 0;
+        bool handlesAllowed = settings.HoverFrameEnabled && pictureVisible && !_controller.PassThrough;
+        bool overPicture = handlesAllowed && NativeMethods.GetCursorPos(out var cursor)
+            && IsPointerOnPicture(rect.Value, cursor);
         long now = Environment.TickCount64;
 
-        bool pictureVisible = _controller.EffectiveOpacity > 0;
-
-        // 画面可见、没有开穿透时，这块区域归手机管
-        bool interactive = connected && pictureVisible && !_controller.PassThrough;
-
-        // 指针要真的落在画面上：画面被别的窗口盖住时不画提示，免得飘到别人家窗口上
-        bool overPicture = interactive && IsPointerOnPicture(rect.Value, cursor);
-
-        if (overPicture)
-        {
-            bool moved = cursor.X != _lastCursor.X || cursor.Y != _lastCursor.Y;
-            if (moved)
-            {
-                _lastCursor = cursor;
-                _stillSince = now;
-                // 鼠标一动，系统自己就把箭头放回来了，别再拿旧状态当"已隐藏"
-                _cursorHidden = false;
-                HidePointerDot();
-            }
-            else if (now - _stillSince >= HideCursorDelayMs)
-            {
-                // 指针停稳了就藏起系统箭头，改用自绘定位点
-                HideCursor();
-                ShowPointerDot(cursor, rect.Value);
-            }
-        }
-        else
-        {
-            _lastCursor = cursor;
-            _stillSince = now;
-            _cursorHidden = false;
-            HidePointerDot();
-            RestoreCursor();
-        }
-
-        // 把手：停在画面上一会儿才出现，避免刚进来就吃掉边缘的点击
-        bool handlesAllowed = connected
-                              && settings.HoverFrameEnabled
-                              && pictureVisible
-                              && !_controller.PassThrough;
-
         bool handlesVisible = false;
-        if (handlesAllowed && overPicture)
+        if (overPicture)
         {
             if (_insideSince < 0) _insideSince = now;
             handlesVisible = now - _insideSince >= HandleDelayMs;
@@ -143,7 +92,7 @@ public partial class MirrorFrameOverlayWindow : Window
         // 位置提示：只有开启"鼠标悬停显示画面"时才有，主窗口那一栏跟着一起显示，
         // 不会出现"不知道哪来的框"这种情况
         bool showHint = connected
-                        && _hoverRevealEnabled
+                        && _controller.HoverRevealEnabled
                         && !pictureVisible
                         && _controller.Topmost
                         && settings.HoverRevealHint != HoverRevealHints.None;
@@ -153,7 +102,7 @@ public partial class MirrorFrameOverlayWindow : Window
         HintCorner.Visibility = showHint && settings.HoverRevealHint == HoverRevealHints.CornerMark
             ? Visibility.Visible : Visibility.Collapsed;
 
-        if (overPicture || handlesVisible || showHint)
+        if (handlesVisible || showHint)
         {
             SyncToMirror(rect);
             if (!IsVisible) Show();
@@ -196,37 +145,6 @@ public partial class MirrorFrameOverlayWindow : Window
         return hitRoot == ownHandle;
     }
 
-    private void ShowPointerDot(NativeMethods.POINT cursor, WindowRect rect)
-    {
-        var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice
-                        ?? Matrix.Identity;
-        double sx = transform.M11 == 0 ? 1 : transform.M11;
-        double sy = transform.M22 == 0 ? 1 : transform.M22;
-
-        double localX = (cursor.X - rect.Left) / sx;
-        double localY = (cursor.Y - rect.Top) / sy;
-
-        Canvas.SetLeft(PointerDot, localX - PointerDot.Width / 2);
-        Canvas.SetTop(PointerDot, localY - PointerDot.Height / 2);
-        PointerDot.Visibility = Visibility.Visible;
-    }
-
-    private void HidePointerDot() => PointerDot.Visibility = Visibility.Collapsed;
-
-    /// <summary>隐藏系统箭头。鼠标一动，系统会自己把箭头放回来。</summary>
-    private void HideCursor()
-    {
-        if (_cursorHidden) return;
-        NativeMethods.SetCursor(IntPtr.Zero);
-        _cursorHidden = true;
-    }
-
-    private void RestoreCursor()
-    {
-        if (!_cursorHidden) return;
-        _cursorHidden = false;
-        NativeMethods.SetCursor(NativeMethods.LoadCursor(IntPtr.Zero, new IntPtr(NativeMethods.IDC_ARROW)));
-    }
     private void SyncToMirror(WindowRect? rectOpt = null)
     {
         var rect = rectOpt ?? _controller.Window.GetContentRect();
