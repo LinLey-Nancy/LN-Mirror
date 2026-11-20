@@ -13,9 +13,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Product>LN-Mirror</Product>
     <AssemblyTitle>LN-Mirror 手机悬浮投屏</AssemblyTitle>
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <DebugType>embedded</DebugType>
@@ -30,6 +30,7 @@
   <!-- 内置官方 scrcpy 引擎（tools 目录由 build-tools 脚本按官方校验和下载）。
        SCRCPY-VERSION.txt 是开发侧 fetch-scrcpy.ps1 的版本记录，程序运行时不读，不随发布带出。 -->
   <ItemGroup>
+    <Resource Include="Assets\app.png" />
     <Content Include="$(MSBuildThisFileDirectory)..\..\tools\**\*" Exclude="$(MSBuildThisFileDirectory)..\..\tools\SCRCPY-VERSION.txt">
       <Link>tools\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

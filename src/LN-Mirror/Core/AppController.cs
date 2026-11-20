@@ -671,9 +671,36 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         _dispatcher.Invoke(() =>
         {
+            var rows = WirelessDebuggingDiscovery.GetDeviceRows(services);
+            for (var i = 0; i < rows.Length; i++)
+            {
+                if (rows[i].Kind == MdnsServiceKind.Connect && HasAuthorizedTransport(rows[i]))
+                    rows[i] = rows[i] with { IsAuthorized = true };
+            }
+
+            if (DiscoveredLan.SequenceEqual(rows)) return;
             DiscoveredLan.Clear();
-            foreach (var service in services) DiscoveredLan.Add(service);
+            foreach (var row in rows) DiscoveredLan.Add(row);
         });
+    }
+
+    private bool HasAuthorizedTransport(MdnsServiceInfo service)
+    {
+        var mdnsSerial = $"{service.InstanceName}._adb-tls-connect._tcp";
+        return _monitor?.Current.Any(device => device.IsReady
+            && (string.Equals(device.Serial, service.Address, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(device.Serial.TrimEnd('.'), mdnsSerial, StringComparison.OrdinalIgnoreCase))) == true;
+    }
+
+    public async Task ConnectDiscoveredLanAsync(MdnsServiceInfo service)
+    {
+        if (!HasAuthorizedTransport(service))
+        {
+            Notice = "在手机的“无线调试”页面选择“使用配对码配对设备”，然后在这条设备记录上点“去配对”。";
+            return;
+        }
+
+        await ConnectLanAsync(service.Address).ConfigureAwait(true);
     }
 
     public async Task RefreshLanDiscoveryAsync()
@@ -699,10 +726,28 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         return $"{match.Groups[1].Value}:{port}";
     }
 
+    private AdbClient? GetAdbForLanRequest()
+    {
+        if (IsBusy)
+        {
+            if (string.IsNullOrWhiteSpace(Notice)) Notice = "正在处理连接，请稍候。";
+            return null;
+        }
+
+        if (IsConnected)
+        {
+            Notice = "投屏已连接。切换设备前请先断开当前投屏。";
+            return null;
+        }
+
+        if (_adb is null) Notice = "内置 ADB 尚不可用，无法连接。";
+        return _adb;
+    }
+
     /// <summary>adb pair 配对码配对，成功后自动连接并启动画面。</summary>
     public async Task PairAndConnectAsync(string? pairAddress, string? pairCode)
     {
-        if (_adb is null || IsBusy || IsConnected) return;
+        if (GetAdbForLanRequest() is not { } adb) return;
 
         var address = NormalizeLanAddress(pairAddress);
         var code = (pairCode ?? string.Empty).Trim();
@@ -721,20 +766,21 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         IsBusy = true;
         Phase = ConnectionPhase.Connecting;
         StatusLine = "正在配对…";
-        Notice = string.Empty;
+        Notice = StatusLine;
 
         string? connectAddress = null;
         string? failure = null;
         try
         {
-            // 记下配对服务的 mDNS 实例名，成功后用它找对应的连接服务（连接端口与配对端口不同）
+            // 配对窗口关闭后临时广播可能消失，提前记录实例名以便查找连接端口。
             var instance = _mdns?.Current
                 .FirstOrDefault(s => s.Kind == MdnsServiceKind.Pairing
                                      && string.Equals(s.Address, address, StringComparison.OrdinalIgnoreCase))
                 ?.InstanceName;
 
-            var result = await _adb.PairAsync(address, code, LifetimeToken).ConfigureAwait(true);
-            if (!result.Combined.Contains("Successfully paired", StringComparison.OrdinalIgnoreCase))
+            var result = await adb.PairAsync(address, code, LifetimeToken).ConfigureAwait(true);
+            if (!result.Ok || !result.Combined.Split('\n', StringSplitOptions.TrimEntries)
+                    .Any(line => line.StartsWith("Successfully paired to ", StringComparison.OrdinalIgnoreCase)))
             {
                 var line = result.Combined.Split('\n')
                     .Select(l => l.Trim())
@@ -746,8 +792,17 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             else
             {
                 AppLog.Info("[局域网] 配对成功");
-                connectAddress = await ResolveConnectAddressAsync(instance).ConfigureAwait(true);
+                connectAddress = await ResolveConnectAddressAsync(address, instance).ConfigureAwait(true);
             }
+        }
+        catch (OperationCanceledException) when (LifetimeToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("[局域网] 执行配对失败", ex);
+            failure = "配对出错，请重新打开手机上的配对码后再试。";
         }
         finally
         {
@@ -769,37 +824,34 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        Notice = "配对成功，正在连接…";
         await ConnectLanAsync(connectAddress).ConfigureAwait(true);
     }
 
-    /// <summary>按 mDNS 实例名找连接服务地址；找不到时刷新一次发现列表再试。</summary>
-    private async Task<string?> ResolveConnectAddressAsync(string? instanceName)
+    /// <summary>配对成功后找对应的连接端口。连接服务尚未出现时刷新一次。</summary>
+    private async Task<string?> ResolveConnectAddressAsync(string pairingAddress, string? instanceName)
     {
-        if (string.IsNullOrEmpty(instanceName) || _mdns is null) return null;
+        if (_mdns is not { } mdns) return null;
 
-        var found = _mdns.Current.FirstOrDefault(s => s.Kind == MdnsServiceKind.Connect
-                                                      && s.InstanceName == instanceName)?.Address;
-        if (found is not null) return found;
+        var found = WirelessDebuggingDiscovery.FindConnectService(mdns.Current, pairingAddress, instanceName);
+        if (found is not null) return found.Address;
 
         try
         {
             await Task.Delay(1200, LifetimeToken).ConfigureAwait(true);
-            await _mdns.RefreshAsync(LifetimeToken).ConfigureAwait(true);
+            await mdns.RefreshAsync(LifetimeToken).ConfigureAwait(true);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             AppLog.Debug($"[发现] 配对后刷新失败：{ex.Message}");
         }
 
-        return _mdns.Current.FirstOrDefault(s => s.Kind == MdnsServiceKind.Connect
-                                                 && s.InstanceName == instanceName)?.Address;
+        return WirelessDebuggingDiscovery.FindConnectService(mdns.Current, pairingAddress, instanceName)?.Address;
     }
 
     /// <summary>adb connect 一个局域网地址，成功后启动画面。</summary>
     public async Task ConnectLanAsync(string? rawAddress)
     {
-        if (_adb is null || IsBusy || IsConnected) return;
+        if (GetAdbForLanRequest() is not { } adb) return;
 
         var address = NormalizeLanAddress(rawAddress);
         if (address is null)
@@ -808,24 +860,31 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             return;
         }
 
+        bool wirelessDebugging = _mdns?.Current.Any(service => service.Kind == MdnsServiceKind.Connect
+            && string.Equals(service.Address, address, StringComparison.OrdinalIgnoreCase)) == true;
+
         IsBusy = true;
         Phase = ConnectionPhase.Connecting;
         StatusLine = "正在连接局域网设备…";
-        Notice = string.Empty;
+        Notice = StatusLine;
 
         string? failure = null;
         AdbDevice? device = null;
         try
         {
-            var result = await _adb.ConnectAsync(address, LifetimeToken).ConfigureAwait(true);
+            var result = await adb.ConnectAsync(address, LifetimeToken).ConfigureAwait(true);
             if (!AdbClient.IsConnectSuccess(result))
             {
-                failure = AdbClient.DescribeConnectFailure(result);
+                failure = AdbClient.DescribeConnectFailure(result, wirelessDebugging);
             }
             else
             {
                 device = await WaitForDeviceAsync(address, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
-                if (device is null)
+                if (wirelessDebugging && device?.IsReady != true)
+                {
+                    failure = $"无线调试设备未就绪。若这台电脑尚未配对，{AdbClient.WirelessPairingHint}";
+                }
+                else if (device is null)
                 {
                     failure = "设备已响应但未出现在设备列表里，请在手机上确认无线调试仍开启。";
                 }
@@ -836,6 +895,15 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                         : device.StateDescription;
                 }
             }
+        }
+        catch (OperationCanceledException) when (LifetimeToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("[局域网] 建立连接失败", ex);
+            failure = "连接出错，请查看日志。";
         }
         finally
         {
@@ -1239,13 +1307,13 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
         IsBusy = true;
         Phase = ConnectionPhase.Connecting;
-        StatusLine = "正在启动画面…";
         _lastErrorLine = string.Empty;
-        Notice = string.Empty;
 
         try
         {
-            await EndSessionAsync("重新连接", ConnectionPhase.Idle, keepSelected: true).ConfigureAwait(true);
+            await EndSessionAsync("重新连接", ConnectionPhase.Connecting, keepSelected: true).ConfigureAwait(true);
+            StatusLine = "正在启动画面…";
+            Notice = StatusLine;
 
             var placement = _settings.MirrorPlacement;
             var options = new ScrcpyStartOptions
@@ -1303,6 +1371,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             Phase = ConnectionPhase.Connected;
             _connectedSerial = device.Serial;
             StatusLine = $"{TransportName(device.Serial)} · {device.DisplayName} · 已连接";
+            Notice = string.Empty;
             ToolbarVisible = true;
             PassThroughCheck = "尚未验证";
             AppLog.Info($"[连接] 画面已建立：{device.DisplayName}");
@@ -1312,6 +1381,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             AppLog.Error("[连接] 建立会话时出错", ex);
             StatusLine = $"连接出错：{ex.Message}";
             Phase = ConnectionPhase.Failed;
+            Notice = StatusLine;
         }
         finally
         {

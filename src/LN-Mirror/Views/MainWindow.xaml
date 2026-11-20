@@ -1,359 +1,548 @@
 <Window x:Class="LNMirror.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="LN-Mirror 手机悬浮投屏"
-        Width="1081" Height="1021" MinWidth="840" MinHeight="620"
-        Background="{StaticResource BgBrush}"
-        FontFamily="Microsoft YaHei UI" FontSize="13"
-        TextOptions.TextFormattingMode="Display"
-        WindowStartupLocation="CenterScreen">
+        Title="LN-Mirror"
+        Width="1092.5" Height="732.5" MinWidth="840" MinHeight="530"
+        Icon="/LN-Mirror;component/Assets/app.png"
+        FontFamily="Microsoft YaHei UI" FontSize="14"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
+        WindowStartupLocation="CenterScreen" PreviewKeyDown="OnWindowPreviewKeyDown">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="DeviceCenterTheme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
 
-    <Grid Margin="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="336"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
-
-        <!-- ============ 左：连接设备 ============ -->
-        <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,12,0">
-            <DockPanel>
-                <TextBlock DockPanel.Dock="Top" Text="连接设备" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,12"/>
-
-                <Border x:Name="PhaseStrip" DockPanel.Dock="Top" Background="#FFF0F0EE" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="3" Padding="10,8" Margin="0,0,0,14">
-                    <StackPanel>
-                        <TextBlock x:Name="PhaseText" Text="{Binding PhaseText}" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                        <TextBlock Text="{Binding PhaseHint}" Foreground="{StaticResource SubTextBrush}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap"/>
-                    </StackPanel>
-                </Border>
-
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <TextBlock Text="当前设备" Style="{StaticResource SectionLabel}"/>
-                        <ComboBox ItemsSource="{Binding Devices}"
-                                  DisplayMemberPath="DisplayName"
-                                  SelectedItem="{Binding SelectedDevice}"
-                                  IsEnabled="{Binding CanConnect}"
-                                  MinHeight="30" Padding="6,3"/>
-
-                        <TextBlock Text="{Binding SelectedDeviceStateText}" Foreground="{StaticResource SubTextBrush}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
-
-                        <TextBlock Text="连接方式" Style="{StaticResource SectionLabel}" Margin="0,16,0,0"/>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                            <RadioButton Content="USB 有线" GroupName="ConnectionMode" IsChecked="{Binding IsUsbMode}" Margin="0,0,16,0" VerticalContentAlignment="Center"/>
-                            <RadioButton Content="局域网" GroupName="ConnectionMode" IsChecked="{Binding IsLanMode}" VerticalContentAlignment="Center"/>
+    <Grid Background="{StaticResource CenterFrame}" TextElement.Foreground="{StaticResource CenterInk}">
+        <TabControl x:Name="Navigation" TabStripPlacement="Left" ItemContainerStyle="{StaticResource CenterNav}">
+            <TabControl.Template>
+                <ControlTemplate TargetType="TabControl">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="48"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="166"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" Margin="18,0,0,0" VerticalAlignment="Center">
+                            <Image Source="/LN-Mirror;component/Assets/app.png" Width="24" Height="24" Margin="0,0,8,0"/>
+                            <TextBlock Text="LN-Mirror" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
                         </StackPanel>
+                        <DockPanel Grid.Row="1" IsItemsHost="True" LastChildFill="False" Margin="10,4"
+                                   KeyboardNavigation.TabNavigation="Once"/>
+                        <Border Grid.Row="1" Grid.Column="1" Margin="0,0,8,8" CornerRadius="16"
+                                Background="{StaticResource CenterSurface}" BorderBrush="{StaticResource CenterLine}" BorderThickness="1">
+                            <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent" Margin="0"
+                                              KeyboardNavigation.TabNavigation="Local"/>
+                        </Border>
+                    </Grid>
+                </ControlTemplate>
+            </TabControl.Template>
 
-                        <!-- USB 分区 -->
-                        <TextBlock Visibility="{Binding IsUsbMode, Converter={StaticResource BoolToVis}}"
-                                   Style="{StaticResource SectionLabel}" TextWrapping="Wrap" Margin="0,4,0,0"
-                                   Text="用数据线连接手机后，设备会出现在上方“当前设备”里。局域网连接切到右侧“局域网”页签。"/>
-
-                        <!-- ============ 局域网分区 ============ -->
-                        <StackPanel Visibility="{Binding IsLanMode, Converter={StaticResource BoolToVis}}" Margin="0,4,0,0">
-
-                            <Grid Margin="0,6,0,2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="发现的设备" Style="{StaticResource SectionLabel}" Margin="0" VerticalAlignment="Center"/>
-                                <Button Grid.Column="1" Content="刷新" Style="{StaticResource ToolButton}" Click="OnRefreshLanClick"/>
-                            </Grid>
-                            <ItemsControl ItemsSource="{Binding DiscoveredLan}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid Margin="0,3">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Address}" FontSize="12"/>
-                                                <TextBlock Text="{Binding KindText}" Foreground="{StaticResource SubTextBrush}" FontSize="11"/>
-                                            </StackPanel>
-                                            <Button Grid.Column="1" Style="{StaticResource ToolButton}" Margin="8,0,0,0"
-                                                    Content="{Binding ActionText}" Click="OnDiscoveredItemClick"/>
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                            <TextBlock Style="{StaticResource SectionLabel}" TextWrapping="Wrap" Margin="0,2,0,0"
-                                       Text="列表每 5 秒自动刷新。“待配对”只在手机打开配对对话框时出现；“可连接”对应无线调试主页的地址。"/>
-
-                            <TextBlock Text="配对新设备" Style="{StaticResource SectionLabel}" Margin="0,12,0,0"/>
-                            <TextBox x:Name="PairAddressBox" Margin="0,0,0,6"
-                                     ToolTip="手机配对对话框里显示的 IP 与配对端口，例如 192.168.1.5:37123"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBox Grid.Column="0" x:Name="PairCodeBox" ToolTip="手机配对对话框里显示的 6 位配对码"/>
-                                <Button Grid.Column="1" Content="配对并连接" Style="{StaticResource ToolButton}" Margin="8,0,0,0" Click="OnPairConnectClick"/>
-                            </Grid>
-                            <TextBlock Style="{StaticResource SectionLabel}" TextWrapping="Wrap" Margin="0,4,0,0"
-                                       Text="手机上：开发者选项 → 无线调试 →“使用配对码配对设备”，依次填入配对地址（IP:端口）与配对码。配对码不保存。"/>
-
-                            <TextBlock Text="手动连接（IP:端口）" Style="{StaticResource SectionLabel}" Margin="0,12,0,0"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBox Grid.Column="0" x:Name="ManualAddressBox" ToolTip="手机“无线调试”主页显示的 IP 与端口，例如 192.168.1.5:41537"/>
-                                <Button Grid.Column="1" Content="连接" Style="{StaticResource ToolButton}" Margin="8,0,0,0" Click="OnManualLanConnectClick"/>
-                            </Grid>
-
-                            <TextBlock Text="历史设备" Style="{StaticResource SectionLabel}" Margin="0,12,0,0"/>
-                            <ItemsControl ItemsSource="{Binding LanHistory}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid Margin="0,3">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold"/>
-                                                <TextBlock Foreground="{StaticResource SubTextBrush}" FontSize="11"
-                                                           Text="{Binding LastConnectedAt, StringFormat={}{0:MM-dd HH:mm}}"/>
-                                            </StackPanel>
-                                            <Button Grid.Column="1" Content="连接" Style="{StaticResource ToolButton}" Margin="8,0,0,0" Click="OnHistoryConnectClick"/>
-                                            <Button Grid.Column="2" Content="删除" Style="{StaticResource ToolButton}" Margin="6,0,0,0" Click="OnHistoryRemoveClick"/>
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-
-                            <CheckBox IsChecked="{Binding LanAutoReconnect}" Margin="0,8,0,0">
-                                <TextBlock Text="断线后自动重连（USB 与局域网；含启动时恢复上次局域网画面）" TextWrapping="Wrap"/>
-                            </CheckBox>
-
-                            <TextBlock Text="备用：USB 已授权手机切无线" Style="{StaticResource SectionLabel}" Margin="0,12,0,0"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBox Grid.Column="0" x:Name="UsbSwitchAddressBox" ToolTip="手机 IP，例如 192.168.1.5（端口默认 5555）"/>
-                                <Button Grid.Column="1" Content="切换并连接" Style="{StaticResource ToolButton}" Margin="8,0,0,0" Click="OnUsbSwitchLanClick"/>
-                            </Grid>
-                            <TextBlock Style="{StaticResource SectionLabel}" TextWrapping="Wrap" Margin="0,4,0,0"
-                                       Text="仅限可信局域网使用：手机需正插着数据线且已授权，切换后用其 IP 直连（旧机型配对方式）。"/>
-                        </StackPanel>
-
-                        <Grid Margin="0,16,0,0">
+            <TabItem Header="设备">
+                <TabItem.Tag><Geometry>M 5,1 H 13 Q 15,1 15,3 V 16 Q 15,18 13,18 H 5 Q 3,18 3,16 V 3 Q 3,1 5,1 M 7,15 H 11</Geometry></TabItem.Tag>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="24,20,24,20">
+                        <Grid Margin="0,0,0,18">
+                            <TextBlock Text="连接设备" Style="{StaticResource CenterPageTitle}"/>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right"
+                                        ToolTip="{Binding StatusLine}">
+                                <Ellipse x:Name="PhaseDot" Width="7" Height="7" Fill="{StaticResource CenterMuted}" Margin="0,0,7,0"/>
+                                <TextBlock x:Name="PhaseText" Text="未连接" FontSize="13" Foreground="{StaticResource CenterMuted}"
+                                           AutomationProperties.LiveSetting="Polite"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="16"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" x:Name="ConnectButton" Content="连接" Style="{StaticResource PrimaryButton}"
-                                    IsEnabled="{Binding CanConnect}" Click="OnConnectClick" Margin="0,0,6,0"/>
-                            <Button Grid.Column="1" Content="断开" IsEnabled="{Binding CanDisconnect}" Click="OnDisconnectClick" Margin="6,0,0,0"/>
+
+                            <Border Style="{StaticResource CenterPanel}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <StackPanel>
+                                        <DockPanel MinHeight="31" Margin="0,0,0,4">
+                                            <Button DockPanel.Dock="Right" Content="↻" AutomationProperties.Name="刷新无线设备" ToolTip="刷新无线设备"
+                                                    FontSize="18" MinHeight="31" Padding="8,0" Style="{StaticResource CenterAction}"
+                                                    Visibility="{Binding IsLanMode, Converter={StaticResource BoolToVis}}" Click="OnRefreshLanClick"/>
+                                            <TextBlock Text="设备列表" Style="{StaticResource CenterSectionTitle}" VerticalAlignment="Center" MinHeight="24"/>
+                                        </DockPanel>
+                                        <Border BorderBrush="{StaticResource CenterLine}" BorderThickness="0,0,0,1" Margin="0,0,0,10">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton Content="无线" GroupName="ConnectionMode" Style="{StaticResource CenterMode}" IsChecked="{Binding IsLanMode}"/>
+                                                <RadioButton Content="USB 有线" GroupName="ConnectionMode" Style="{StaticResource CenterMode}" IsChecked="{Binding IsUsbMode}"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <ListBox x:Name="DeviceList" ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}"
+                                                 AutomationProperties.Name="已识别的设备" ItemContainerStyle="{StaticResource CenterDeviceRow}"
+                                                 BorderThickness="0" Padding="0" MaxHeight="155" Margin="0,0,0,8"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                            <ListBox.Style>
+                                                <Style TargetType="ListBox">
+                                                    <Style.Triggers>
+                                                        <Trigger Property="HasItems" Value="False"><Setter Property="Visibility" Value="Collapsed"/></Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </ListBox.Style>
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel>
+                                                        <TextBlock FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                                   ToolTip="{Binding DisplayName}">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Text" Value="{Binding Model}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Model}" Value="">
+                                                                            <Setter Property="Text" Value="{Binding Serial}"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding StateDescription}" Style="{StaticResource CenterNote}" Margin="0,2,0,0"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+
+                                        <Border Background="{StaticResource CenterSoft}" CornerRadius="6" Padding="12,10" Margin="0,0,0,10">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding IsLanMode}" Value="True"/>
+                                                                <Condition Binding="{Binding ElementName=DeviceList, Path=HasItems}" Value="False"/>
+                                                                <Condition Binding="{Binding ElementName=DiscoveredDevices, Path=HasItems}" Value="False"/>
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </MultiDataTrigger>
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding IsUsbMode}" Value="True"/>
+                                                                <Condition Binding="{Binding ElementName=DeviceList, Path=HasItems}" Value="False"/>
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </MultiDataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <TextBlock Style="{StaticResource CenterNote}" x:Name="EmptyDeviceHint"/>
+                                        </Border>
+
+                                        <StackPanel Visibility="{Binding IsLanMode, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="发现的设备" Style="{StaticResource CenterNote}" Margin="0,0,0,4"
+                                                       Visibility="{Binding ElementName=DiscoveredDevices, Path=HasItems, Converter={StaticResource BoolToVis}}"/>
+                                            <ScrollViewer MaxHeight="152" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                                <ItemsControl x:Name="DiscoveredDevices" ItemsSource="{Binding DiscoveredLan}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border BorderBrush="{StaticResource CenterLine}" BorderThickness="0,1,0,0" Padding="0,5">
+                                                                <DockPanel>
+                                                                    <Button DockPanel.Dock="Right" Content="{Binding ActionText}" Style="{StaticResource CenterAction}"
+                                                                            Click="OnDiscoveredItemClick" Margin="7,0,0,0"/>
+                                                                    <StackPanel Margin="0,3,0,3">
+                                                                        <TextBlock Text="{Binding Address}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                                                   ToolTip="{Binding Address}"/>
+                                                                        <TextBlock Text="{Binding KindText}" Style="{StaticResource CenterNote}"/>
+                                                                    </StackPanel>
+                                                                </DockPanel>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </ScrollViewer>
+                                        </StackPanel>
+
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1">
+                                        <DockPanel Margin="0,6,0,0" LastChildFill="False">
+                                            <Button x:Name="ConnectButton" DockPanel.Dock="Right" Content="开始投屏" MinWidth="92"
+                                                    Style="{StaticResource CenterPrimary}" IsEnabled="{Binding CanConnect}" Click="OnConnectClick"/>
+                                            <Button x:Name="DisconnectButton" DockPanel.Dock="Right" Content="结束投屏"
+                                                    Style="{StaticResource CenterOutline}" IsEnabled="{Binding CanDisconnect}" Click="OnDisconnectClick" Visibility="Collapsed"/>
+                                            <Button x:Name="AddDeviceButton" DockPanel.Dock="Left" Content="+  添加设备"
+                                                    Style="{StaticResource CenterAction}" Click="OnAddDeviceClick"
+                                                    Visibility="{Binding IsLanMode, Converter={StaticResource BoolToVis}}"/>
+                                        </DockPanel>
+                                        <TextBlock x:Name="ConnectionDetail" Style="{StaticResource CenterNote}" Margin="0,10,0,0" Visibility="Collapsed"/>
+
+                                        <StackPanel Visibility="{Binding IsLanMode, Converter={StaticResource BoolToVis}}">
+                                            <Expander x:Name="OtherConnections" Header="其他连接选项" Style="{StaticResource CenterDisclosure}" Margin="0,8,0,0">
+                                                <StackPanel Margin="0,8,0,0">
+                                                    <TextBlock Text="手动连接" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="填写「无线调试」主页的 IP 和端口。" Style="{StaticResource CenterNote}" Margin="0,3,0,5"/>
+                                                    <DockPanel>
+                                                        <Button DockPanel.Dock="Right" Content="连接" Style="{StaticResource CenterOutline}"
+                                                                Click="OnManualLanConnectClick" Margin="6,0,0,0"/>
+                                                        <TextBox x:Name="ManualAddressBox" AutomationProperties.Name="手动连接地址"/>
+                                                    </DockPanel>
+                                                    <TextBlock Text="历史设备" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                                                    <TextBlock Text="暂无历史设备">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock" BasedOn="{StaticResource CenterNote}">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding ElementName=HistoryDevices, Path=HasItems}" Value="False">
+                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <ItemsControl x:Name="HistoryDevices" ItemsSource="{Binding LanHistory}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <DockPanel Margin="0,3">
+                                                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="5,0,0,0">
+                                                                        <Button Content="连接" Style="{StaticResource CenterAction}" Click="OnHistoryConnectClick"/>
+                                                                        <Button Content="移除" Style="{StaticResource CenterAction}" Click="OnHistoryRemoveClick"/>
+                                                                    </StackPanel>
+                                                                    <StackPanel VerticalAlignment="Center">
+                                                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}"/>
+                                                                        <TextBlock Text="{Binding LastConnectedAt, StringFormat={}{0:MM-dd HH:mm}}" Style="{StaticResource CenterNote}"/>
+                                                                    </StackPanel>
+                                                                </DockPanel>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                    <TextBlock Text="USB 转无线" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                                                    <TextBlock Text="仅用于可信局域网。请先用数据线连接手机并允许 USB 调试。" Style="{StaticResource CenterNote}" Margin="0,0,0,5"/>
+                                                    <DockPanel>
+                                                        <Button DockPanel.Dock="Right" Content="切换并连接" Style="{StaticResource CenterOutline}"
+                                                                Click="OnUsbSwitchLanClick" Margin="6,0,0,0"/>
+                                                        <TextBox x:Name="UsbSwitchAddressBox" AutomationProperties.Name="手机 IP" ToolTip="填写手机 IP，默认端口 5555"/>
+                                                    </DockPanel>
+                                                </StackPanel>
+                                            </Expander>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Column="2" Style="{StaticResource CenterPanel}">
+                                <StackPanel>
+                                    <Grid MinHeight="31" Margin="0,0,0,4">
+                                        <TextBlock Text="悬浮画面" Style="{StaticResource CenterSectionTitle}" VerticalAlignment="Center"/>
+                                        <TextBlock Text="示意" Style="{StaticResource CenterNote}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Border Background="{StaticResource CenterSoft}" CornerRadius="7" Padding="12,10" ClipToBounds="True">
+                                        <Grid Height="132" IsHitTestVisible="False">
+                                            <Border Height="88" Margin="2,0,35,0" CornerRadius="6" Background="White"
+                                                    BorderBrush="{StaticResource CenterLine}" BorderThickness="1" VerticalAlignment="Center">
+                                                <DockPanel>
+                                                    <Border DockPanel.Dock="Top" Height="25" Padding="8,0" BorderThickness="0,0,0,1" BorderBrush="{StaticResource CenterLine}">
+                                                        <TextBlock Text="桌面" Style="{StaticResource CenterNote}" VerticalAlignment="Center"/>
+                                                    </Border>
+                                                    <StackPanel Orientation="Horizontal" Margin="11,0,0,0" VerticalAlignment="Center">
+                                                        <Path Data="M 1,4 H 6 L 9,7 H 16 V 16 H 1 Z" Stroke="{StaticResource CenterMuted}" StrokeThickness="1.2"
+                                                              Width="16" Height="16" Stretch="Uniform" Margin="0,0,7,0"/>
+                                                        <TextBlock Text="文件" FontSize="12" Foreground="{StaticResource CenterMuted}"/>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                            <Grid Width="68" Height="118" HorizontalAlignment="Right" Margin="0,0,26,0">
+                                                <Border x:Name="PreviewOutline" CornerRadius="9" BorderBrush="#FF7591AA" BorderThickness="1" Visibility="Collapsed"/>
+                                                <Border x:Name="PreviewCorner" CornerRadius="4,0,0,0" Width="13" Height="13" BorderBrush="{StaticResource CenterAccent}"
+                                                        HorizontalAlignment="Left" VerticalAlignment="Top" BorderThickness="2,2,0,0" Visibility="Collapsed"/>
+                                                <Border x:Name="PreviewPhone" CornerRadius="9" Background="#E6BFDBF1" BorderBrush="#FF294B6A" BorderThickness="2" Opacity="0.78">
+                                                    <Grid>
+                                                        <Ellipse Width="4" Height="4" Fill="#FF294B6A" VerticalAlignment="Top" Margin="0,6,0,0"/>
+                                                        <TextBlock Text="手机画面" Foreground="#FF234663" FontSize="12" FontWeight="SemiBold"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        <Border Background="#FF416580" Width="23" Height="2" CornerRadius="1"
+                                                                VerticalAlignment="Bottom" Margin="0,0,0,6"/>
+                                                    </Grid>
+                                                </Border>
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
+
+                                    <Grid Margin="0,12,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding OpacityLabel}" VerticalAlignment="Center"/>
+                                        <Slider Grid.Column="1" Minimum="0" Maximum="100" SmallChange="1" LargeChange="5" TickFrequency="1"
+                                                IsSnapToTickEnabled="True" IsMoveToPointEnabled="True" VerticalAlignment="Center"
+                                                AutomationProperties.Name="画面不透明度" IsEnabled="{Binding OpacityEnabled}" Value="{Binding Opacity, Mode=TwoWay}"
+                                                Style="{StaticResource CenterSlider}" Margin="10,0"/>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                            <TextBox Text="{Binding Opacity, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                                     AutomationProperties.Name="不透明度百分比" PreviewTextInput="OnOpacityPreviewInput"
+                                                     IsEnabled="{Binding OpacityEnabled}" Width="44" MinHeight="29" MaxLength="3"
+                                                     TextAlignment="Right" Typography.NumeralAlignment="Tabular"/>
+                                            <TextBlock Text="%" VerticalAlignment="Center" Margin="3,0,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock x:Name="PreviewState" Style="{StaticResource CenterNote}" Margin="0,0,0,8"/>
+                                    <Border BorderBrush="{StaticResource CenterLine}" BorderThickness="0,1,0,0" Padding="0,8,0,0">
+                                        <DockPanel LastChildFill="False">
+                                            <ToggleButton DockPanel.Dock="Left" Content="鼠标穿透" IsChecked="{Binding PassThrough, Mode=TwoWay}"
+                                                          IsEnabled="{Binding PassThroughEnabled}" Style="{StaticResource CenterQuickToggle}"
+                                                          ToolTip="开启后，点击落到画面下方的窗口" Margin="0,0,4,0"/>
+                                            <ToggleButton DockPanel.Dock="Left" Content="置顶" IsChecked="{Binding Topmost, Mode=TwoWay}"
+                                                          Style="{StaticResource CenterQuickToggle}"/>
+                                            <Button DockPanel.Dock="Right" Content="找回画面" Style="{StaticResource CenterAction}" Click="OnRestoreClick" IsEnabled="{Binding IsConnected}"
+                                                    ToolTip="恢复 100% 不透明度、关闭穿透并找回窗口"/>
+                                        </DockPanel>
+                                    </Border>
+                                    <Button Content="显示工具条" Style="{StaticResource CenterAction}" Click="OnShowToolbarClick"
+                                            HorizontalAlignment="Left" Visibility="{Binding IsConnected, Converter={StaticResource BoolToVis}}"/>
+                                </StackPanel>
+                            </Border>
                         </Grid>
 
-                        <TextBlock Text="{Binding StatusLine}" FontSize="12" Margin="0,12,0,0" TextWrapping="Wrap" Foreground="{StaticResource SubTextBrush}"/>
-
-                        <TextBlock Text="首次使用" Style="{StaticResource SectionLabel}" Margin="0,16,0,0"/>
-                        <TextBlock Style="{StaticResource SectionLabel}" TextWrapping="Wrap" Margin="0,0,0,10"
-                                   Text="USB：手机开启“开发者选项”与“USB 调试”，数据线连接后在手机授权框勾选“始终允许”。&#10;局域网：手机与电脑同一网络；手机开启“无线调试”，用上面的配对区配一次对，之后进历史设备一键连接。&#10;部分机型还需打开“USB 调试（安全设置）”才能用鼠标操作。手机不需要 Root。"
-                                   Foreground="{StaticResource TextBrush}"/>
-
-                        <TextBlock Text="关于音频" Style="{StaticResource SectionLabel}" Margin="0,12,0,0"/>
-                        <TextBlock Style="{StaticResource SectionLabel}" TextWrapping="Wrap" Text="当前版本只转发画面与鼠标操作，不转发声音。"
-
-                                   Foreground="{StaticResource TextBrush}"/>
-
-                        <TextBlock Text="内置引擎" Style="{StaticResource SectionLabel}" Margin="0,12,0,0"/>
-                        <TextBlock Text="{Binding EngineText}" Style="{StaticResource SectionLabel}" TextWrapping="Wrap"/>
-                        <TextBlock Text="{Binding AdbVersionText}" Style="{StaticResource SectionLabel}" TextWrapping="Wrap"/>
+                        <Border Style="{StaticResource CenterPanel}" Margin="0,14,0,0">
+                            <StackPanel>
+                                <TextBlock Text="悬浮窗口" Style="{StaticResource CenterSectionTitle}" Margin="0,0,0,5"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="24"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <CheckBox Content="鼠标悬停时显示画面" IsChecked="{Binding HoverRevealEnabled}" Style="{StaticResource CenterSettingCheck}"
+                                                  ToolTip="鼠标移出时隐藏画面，移入时按设定的不透明度显示"/>
+                                        <DockPanel Visibility="{Binding HoverRevealEnabled, Converter={StaticResource BoolToVis}}" Margin="0,5">
+                                            <TextBlock Text="隐藏时的位置提示" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <ComboBox ItemsSource="{Binding HoverRevealHintOptions}" DisplayMemberPath="DisplayName"
+                                                      AutomationProperties.Name="隐藏时的位置提示" SelectedValuePath="Key"
+                                                      SelectedValue="{Binding HoverRevealHint}" HorizontalAlignment="Right" Width="94"/>
+                                        </DockPanel>
+                                        <CheckBox Content="悬停显示拖动把手" IsChecked="{Binding HoverFrameEnabled}" Style="{StaticResource CenterSettingCheck}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <CheckBox Content="无边框" IsChecked="{Binding Borderless}" Style="{StaticResource CenterSettingCheck}"/>
+                                        <CheckBox Content="工具条跟随画面" IsChecked="{Binding ToolbarFollowsMirror}" Style="{StaticResource CenterSettingCheck}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
-            </DockPanel>
-        </Border>
+            </TabItem>
 
-        <!-- ============ 右：画面与交互设置 ============ -->
-        <Grid Grid.Row="0" Grid.Column="1">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
+            <TabItem Header="画面设置">
+                <TabItem.Tag><Geometry>M 1,4 H 17 M 1,9 H 17 M 1,14 H 17 M 6,2 V 6 M 12,7 V 11 M 8,12 V 16</Geometry></TabItem.Tag>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="24,20,24,20">
+                        <TextBlock Text="画面设置" Style="{StaticResource CenterPageTitle}" Margin="0,0,0,18"/>
 
-            <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,12">
-                <StackPanel>
-                    <TextBlock Text="画面与交互" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,10"/>
-
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="90"/>
-                            <ColumnDefinition Width="200"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="质量档位" VerticalAlignment="Center"/>
-                        <ComboBox Grid.Row="0" Grid.Column="1" Margin="0,0,0,8"
-                                  ItemsSource="{Binding QualityProfiles}"
-                                  DisplayMemberPath="DisplayName"
-                                  SelectedValuePath="Key"
-                                  SelectedValue="{Binding Quality}"/>
-                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding QualitySummary}" Style="{StaticResource SectionLabel}"
-                                   VerticalAlignment="Center" Margin="12,0,0,8" TextWrapping="Wrap"/>
-
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="渲染后端" VerticalAlignment="Center"/>
-                        <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,0,0,8"
-                                  ItemsSource="{Binding RenderDriverOptions}"
-                                  SelectedItem="{Binding RenderDriver}"/>
-                        <TextBlock Grid.Row="1" Grid.Column="2" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="12,0,0,8" TextWrapping="Wrap"
-                                   Text="透明不生效时试 software 或 opengl，需重新连接"/>
-
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="窗口外观" VerticalAlignment="Top" Margin="0,6,0,0"/>
-                        <WrapPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,8">
-                            <CheckBox Content="画面窗口无系统边框" IsChecked="{Binding Borderless}" Margin="0,0,16,0"
-                                      ToolTip="去掉画面窗口的系统标题栏和边框，改用悬停把手移动与缩放。点一下立刻生效，不用重连。"/>
-                            <CheckBox Content="悬停显示拖动把手" IsChecked="{Binding HoverFrameEnabled}" Margin="0,0,16,0"
-                                      ToolTip="鼠标停在画面上一会儿后，四边出现把手可拖动缩放。"/>
-                            <CheckBox Content="鼠标悬停显示画面" IsChecked="{Binding HoverRevealEnabled}" Margin="0,0,16,0"
-                                      ToolTip="画面常态完全透明，鼠标移到画面上才按设定的不透明度显示出来。"/>
-                            <CheckBox Content="保持手机常亮" IsChecked="{Binding KeepAwake}" Margin="0,0,16,0"/>
-                            <CheckBox Content="工具条跟随画面" IsChecked="{Binding ToolbarFollowsMirror}" Margin="0"/>
-                        </WrapPanel>
-
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="置顶 / 穿透" VerticalAlignment="Center"/>
-                        <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal">
-                            <CheckBox Content="画面置顶" IsChecked="{Binding Topmost}" Margin="0,0,16,0"/>
-                            <CheckBox Content="鼠标穿透" IsChecked="{Binding PassThrough}" IsEnabled="{Binding PassThroughEnabled}" Margin="0"/>
-                        </StackPanel>
-
-                        <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal"
-                                    Visibility="{Binding HoverRevealEnabled, Converter={StaticResource BoolToVis}}">
-                            <TextBlock Text="隐藏时的提示" Width="90" VerticalAlignment="Center" Margin="0,0,0,0"/>
-                            <ComboBox Width="120" ItemsSource="{Binding HoverRevealHintOptions}"
-                                      DisplayMemberPath="DisplayName" SelectedValuePath="Key"
-                                      SelectedValue="{Binding HoverRevealHint}"
-                                      ToolTip="画面完全看不见时，用什么方式标出它原来的位置"/>
-                            <TextBlock Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="10,0,0,0"
-                                       Text="画面看不见时在这里标出它原来的位置"/>
-                        </StackPanel>
-                    </Grid>
-
-                    <Grid Margin="0,12,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="90"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="{Binding OpacityLabel}" VerticalAlignment="Center"/>
-                        <Slider Grid.Column="1" Minimum="0" Maximum="100" TickFrequency="1" TickPlacement="BottomRight"
-                                IsSnapToTickEnabled="True" SmallChange="1" LargeChange="5"
-                                IsEnabled="{Binding OpacityEnabled}"
-                                Value="{Binding Opacity, Mode=TwoWay}" Margin="0,0,12,0"/>
-                        <StackPanel Grid.Column="2" Orientation="Horizontal">
-                            <TextBox Width="52" TextAlignment="Center" Text="{Binding Opacity, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
-                                     IsEnabled="{Binding OpacityEnabled}" PreviewTextInput="OnOpacityPreviewInput"/>
-                            <TextBlock Text="%" VerticalAlignment="Center" Margin="6,0,0,0"/>
-                            <StackPanel Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Center">
-                                <Button Content="0" Tag="0" Style="{StaticResource ToolButton}" Click="OnOpacityPresetClick" IsEnabled="{Binding OpacityEnabled}" Padding="7,4" MinWidth="0"/>
-                                <Button Content="25" Tag="25" Style="{StaticResource ToolButton}" Click="OnOpacityPresetClick" IsEnabled="{Binding OpacityEnabled}" Padding="7,4" MinWidth="0" Margin="4,0,0,0"/>
-                                <Button Content="50" Tag="50" Style="{StaticResource ToolButton}" Click="OnOpacityPresetClick" IsEnabled="{Binding OpacityEnabled}" Padding="7,4" MinWidth="0" Margin="4,0,0,0"/>
-                                <Button Content="75" Tag="75" Style="{StaticResource ToolButton}" Click="OnOpacityPresetClick" IsEnabled="{Binding OpacityEnabled}" Padding="7,4" MinWidth="0" Margin="4,0,0,0"/>
+                        <Border Style="{StaticResource CenterPanel}" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="连接与画质" Style="{StaticResource CenterSectionTitle}" Margin="0,0,0,10"/>
+                                <DockPanel>
+                                    <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding QualityProfiles}" DisplayMemberPath="DisplayName"
+                                              SelectedValuePath="Key" SelectedValue="{Binding Quality}" AutomationProperties.Name="质量档位"
+                                              Width="166" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                    <StackPanel>
+                                        <TextBlock Text="质量档位"/>
+                                        <TextBlock Text="{Binding QualitySummary}" Style="{StaticResource CenterNote}" Margin="0,3,0,0"/>
+                                    </StackPanel>
+                                </DockPanel>
+                                <CheckBox Content="投屏时保持手机常亮" IsChecked="{Binding KeepAwake}" Style="{StaticResource CenterSettingCheck}"/>
+                                <CheckBox Content="断线后自动重连" IsChecked="{Binding LanAutoReconnect}" Style="{StaticResource CenterSettingCheck}"
+                                          ToolTip="适用于 USB 和无线连接，含启动时恢复上次无线投屏"/>
+                                <TextBlock Text="画质、渲染和常亮在连接时生效。" Style="{StaticResource CenterNote}" Margin="0,4,0,0"/>
+                                <Button Content="应用设置并重连" Style="{StaticResource CenterOutline}" Click="OnApplyAndReconnectClick"
+                                        HorizontalAlignment="Right" Visibility="{Binding IsConnected, Converter={StaticResource BoolToVis}}"
+                                        IsEnabled="{Binding OpacityEnabled}" Margin="0,8,0,0"/>
                             </StackPanel>
-                            <Button Content="恢复 100" Style="{StaticResource ToolButton}" Click="OnRestoreClick" Margin="10,0,0,0"/>
-                        </StackPanel>
-                    </Grid>
-
-                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                        <Button Content="显示工具条" Style="{StaticResource ToolButton}" Click="OnShowToolbarClick"/>
-                        <Button Content="验证鼠标穿透" Style="{StaticResource ToolButton}" Click="OnVerifyPassThroughClick" Margin="8,0,0,0"/>
-                        <Button Content="应用设置并重连" Style="{StaticResource ToolButton}" Click="OnApplyAndReconnectClick" Margin="8,0,0,0"
-                                IsEnabled="{Binding IsConnected}"/>
-                        <TextBlock Text="{Binding PassThroughCheck}" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                        </Border>
+                        <Border Style="{StaticResource CenterPanel}" Padding="13,8">
+                            <Expander Header="快捷键与兼容性" Style="{StaticResource CenterDisclosure}">
+                                <StackPanel Margin="2,10,2,4">
+                                    <TextBlock Text="选中输入框后按下组合键。" Style="{StaticResource CenterNote}" Margin="0,0,0,6"/>
+                                    <DockPanel Margin="0,0,0,8">
+                                        <TextBlock Text="找回画面" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox x:Name="RestoreKeyBox" Width="166" MinHeight="32" HorizontalAlignment="Right"
+                                                 AutomationProperties.Name="找回画面的快捷键"
+                                                 Text="{Binding HotkeyRestore, UpdateSourceTrigger=LostFocus}" Tag="restore" KeyDown="OnHotKeyBoxKeyDown"/>
+                                    </DockPanel>
+                                    <DockPanel Margin="0,0,0,8">
+                                        <TextBlock Text="切换鼠标穿透" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox Width="166" MinHeight="32" HorizontalAlignment="Right" AutomationProperties.Name="切换鼠标穿透的快捷键"
+                                                 Text="{Binding HotkeyPassThrough, UpdateSourceTrigger=LostFocus}" Tag="passthrough" KeyDown="OnHotKeyBoxKeyDown"/>
+                                    </DockPanel>
+                                    <DockPanel>
+                                        <TextBlock Text="渲染后端" VerticalAlignment="Center" ToolTip="透明度不生效时可尝试 software 或 opengl"/>
+                                        <ComboBox ItemsSource="{Binding RenderDriverOptions}" SelectedItem="{Binding RenderDriver}"
+                                                  AutomationProperties.Name="渲染后端" HorizontalAlignment="Right" Width="166"/>
+                                    </DockPanel>
+                                </StackPanel>
+                            </Expander>
+                        </Border>
                     </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
-                    <TextBlock Style="{StaticResource SectionLabel}" TextWrapping="Wrap" Margin="0,10,0,0"
-                               Text="不透明度与鼠标穿透互不影响：半透明时点击仍交给手机；画面为 0% 时会自动不接收点击，但不会改掉你勾选的穿透状态。可随时用工具条、托盘或恢复热键找回画面。"/>
+            <TabItem Header="诊断">
+                <TabItem.Tag><Geometry>M 1,9 H 5 L 8,2 L 11,16 L 14,9 H 17</Geometry></TabItem.Tag>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="24,20,24,20">
+                        <TextBlock Text="运行诊断" Style="{StaticResource CenterPageTitle}" Margin="0,0,0,18"/>
+                        <Border Style="{StaticResource CenterPanel}" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="投屏状态" Style="{StaticResource CenterSectionTitle}" Margin="0,0,0,10"/>
+                                <UniformGrid Columns="4" Margin="0,0,0,10">
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock Text="引擎帧率" Style="{StaticResource CenterNote}" ToolTip="解码帧率"/>
+                                        <TextBlock Text="{Binding FpsText}" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock Text="画面尺寸" Style="{StaticResource CenterNote}"/>
+                                        <TextBlock Text="{Binding WindowInfo}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock Text="不透明度" Style="{StaticResource CenterNote}"/>
+                                        <TextBlock Text="{Binding OpacityStateText}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <TextBlock Text="置顶" Style="{StaticResource CenterNote}"/>
+                                        <TextBlock Text="{Binding TopmostText}" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                </UniformGrid>
+                                <TextBlock Text="{Binding StatusLine}" Style="{StaticResource CenterNote}" Margin="0,0,0,4"/>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Button Content="验证鼠标穿透" DockPanel.Dock="Right" Style="{StaticResource CenterOutline}"
+                                            Click="OnVerifyPassThroughClick" IsEnabled="{Binding PassThroughEnabled}" Margin="9,0,0,0"/>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding PassThroughText}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding PassThroughCheck}" Style="{StaticResource CenterNote}"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource CenterPanel}">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,10">
+                                    <TextBlock Text="日志" Style="{StaticResource CenterSectionTitle}"/>
+                                    <TextBlock Text="{Binding AppVersionText, StringFormat='版本 {0}'}" Style="{StaticResource CenterNote}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                                <WrapPanel Margin="0,0,0,8">
+                                    <Button Content="环境自检" Style="{StaticResource CenterOutline}" Click="OnSelfTestClick" Margin="0,0,8,0"/>
+                                    <Button Content="复制诊断信息" Style="{StaticResource CenterAction}" Click="OnCopyDiagnosticsClick" Margin="0,0,8,0"/>
+                                    <Button Content="打开日志目录" Style="{StaticResource CenterAction}" Click="OnOpenLogFolderClick"/>
+                                </WrapPanel>
+                                <TextBox x:Name="LogBox" Style="{StaticResource MonoText}" MinHeight="115" MaxHeight="225"
+                                         AutomationProperties.Name="运行日志" HorizontalScrollBarVisibility="Auto"/>
+                                <Expander Header="引擎信息" Style="{StaticResource CenterDisclosure}" Margin="0,5,0,0">
+                                    <StackPanel Margin="0,8,0,0">
+                                        <TextBlock Text="{Binding EngineText}" Style="{StaticResource CenterNote}"/>
+                                        <TextBlock Text="{Binding AdbVersionText}" Style="{StaticResource CenterNote}" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                </Expander>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
-                    <TextBlock Style="{StaticResource SectionLabel}" TextWrapping="Wrap" Margin="0,4,0,0"
-                               Text="质量档位、渲染后端与常亮在连接时生效；连接中修改后点“应用设置并重连”立即生效。无边框与悬停把手点一下就生效。"/>
-                </StackPanel>
-            </Border>
+            <TabItem Header="帮助" DockPanel.Dock="Bottom">
+                <TabItem.Tag><Geometry>M 17,9 A 8,8 0 1 1 1,9 A 8,8 0 1 1 17,9 M 6,6 Q 7,3 10,4 Q 13,6 10,8 Q 9,9 9,11 M 9,13 V 14</Geometry></TabItem.Tag>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="24,20,24,20">
+                        <TextBlock Text="使用帮助" Style="{StaticResource CenterPageTitle}" Margin="0,0,0,18"/>
+                        <Border Style="{StaticResource CenterPanel}" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="使用教程" Style="{StaticResource CenterSectionTitle}" Margin="0,0,0,10"/>
+                                <TextBlock Text="先开启开发者选项" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBlock Text="打开手机的「设置」→「关于手机」，连点「版本号」7 次，再到设置里搜索「开发者选项」（也叫「开发人员选项」）。"
+                                           Style="{StaticResource CenterNote}" FontSize="14"/>
+                                <Border BorderBrush="{StaticResource CenterLine}" BorderThickness="0,1,0,0" Margin="0,12,0,0" Padding="0,12,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold" Margin="0,0,0,5">
+                                                <Run Text="无线连接"/>
+                                                <Run Text="（Android 11 及以上）" FontSize="12" FontWeight="Normal" Foreground="{StaticResource CenterMuted}"/>
+                                            </TextBlock>
+                                            <TextBlock Text="1. 让手机和电脑接入同一局域网。在「开发者选项」中打开「无线调试」。"
+                                                       Style="{StaticResource CenterNote}" FontSize="14" Margin="0,0,0,4"/>
+                                            <TextBlock Text="2. 点进「无线调试」，选择「使用配对码配对设备」，保持手机上的配对窗口打开。"
+                                                       Style="{StaticResource CenterNote}" FontSize="14" Margin="0,0,0,4"/>
+                                            <TextBlock Text="3. 在 LN-Mirror 选择「无线」→「添加设备」，填入手机配对窗口里的 IP:端口和 6 位配对码，点击「配对并连接」。"
+                                                       Style="{StaticResource CenterNote}" FontSize="14"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="USB 有线连接" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                                            <TextBlock Text="1. 在手机的「开发者选项」中打开「USB 调试」。"
+                                                       Style="{StaticResource CenterNote}" FontSize="14" Margin="0,0,0,4"/>
+                                            <TextBlock Text="2. 用支持数据传输的 USB 线连接电脑。解锁手机，在授权弹窗中点「允许」。"
+                                                       Style="{StaticResource CenterNote}" FontSize="14" Margin="0,0,0,4"/>
+                                            <TextBlock Text="3. 在 LN-Mirror 选择「USB 有线」，选中手机后点击「开始投屏」。"
+                                                       Style="{StaticResource CenterNote}" FontSize="14"/>
+                                            <TextBlock Text="部分机型还需打开「USB 调试（安全设置）」，才能用电脑鼠标操作手机。"
+                                                       Style="{StaticResource CenterNote}" Margin="0,8,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource CenterPanel}">
+                            <StackPanel>
+                                <TextBlock Text="画面隐藏时" Style="{StaticResource CenterSectionTitle}" Margin="0,0,0,8"/>
+                                <TextBlock Text="{Binding HotkeyRestore, StringFormat='按 {0} 找回画面，也可使用设备页、工具条或托盘。'}" TextWrapping="Wrap"/>
+                                <TextBlock Text="声音仍在手机上播放。" Style="{StaticResource CenterNote}" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
 
-            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,12">
+        <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="178,0,16,0" Height="46">
+            <TextBlock Text="{Binding Notice}" Style="{StaticResource CenterNote}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                       TextWrapping="NoWrap" ToolTip="{Binding Notice}" AutomationProperties.LiveSetting="Polite"/>
+        </Border>
+        <Grid x:Name="PairingOverlay" Background="#60172434" Visibility="Collapsed"
+              KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
+            <Border Width="454" VerticalAlignment="Center" HorizontalAlignment="Center"
+                    Style="{StaticResource CenterPanel}" Padding="20" AutomationProperties.Name="配对新设备">
                 <StackPanel>
-                    <TextBlock Text="全局快捷键" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="恢复 100" Width="90" VerticalAlignment="Center"/>
-                        <TextBox Width="180" Text="{Binding HotkeyRestore, UpdateSourceTrigger=LostFocus}" Tag="restore" KeyDown="OnHotKeyBoxKeyDown"/>
-                        <TextBlock Text="穿透切换" Width="90" VerticalAlignment="Center" Margin="16,0,0,0"/>
-                        <TextBox Width="180" Text="{Binding HotkeyPassThrough, UpdateSourceTrigger=LostFocus}" Tag="passthrough" KeyDown="OnHotKeyBoxKeyDown"/>
+                    <DockPanel Margin="0,0,0,8">
+                        <Button x:Name="PairCloseButton" DockPanel.Dock="Right" Content="×" Style="{StaticResource CenterAction}"
+                                FontSize="18" AutomationProperties.Name="关闭配对弹窗" Click="OnClosePairingClick"/>
+                        <TextBlock Text="配对新设备" Style="{StaticResource CenterSectionTitle}" VerticalAlignment="Center"/>
+                    </DockPanel>
+                    <TextBlock Text="在手机的「无线调试」中打开「使用配对码配对设备」。"
+                               Style="{StaticResource CenterNote}" FontSize="14" Margin="0,0,0,12"/>
+                    <StackPanel x:Name="PairFields">
+                        <TextBlock Text="配对地址" Margin="0,0,0,4"/>
+                        <TextBox x:Name="PairAddressBox" AutomationProperties.Name="配对地址" MinHeight="36"
+                                 ToolTip="输入配对窗口显示的 IP 和端口"/>
+                        <TextBlock Text="配对码" Margin="0,10,0,4"/>
+                        <TextBox x:Name="PairCodeBox" AutomationProperties.Name="配对码" MinHeight="36"/>
                     </StackPanel>
-                    <TextBlock Style="{StaticResource SectionLabel}" TextWrapping="Wrap" Margin="0,8,0,0"
-                               Text="格式示例 Ctrl+Alt+Shift+R。必须包含 Ctrl/Alt/Shift/Win 之一。修改后失焦生效；若被其它程序占用会提示，托盘入口始终可用。"/>
+                    <TextBlock x:Name="PairingMessage" Style="{StaticResource CenterNote}" Visibility="Collapsed"
+                               AutomationProperties.LiveSetting="Polite" Margin="0,8,0,0"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                        <Button x:Name="CancelPairButton" Content="取消" Style="{StaticResource CenterAction}" Click="OnClosePairingClick" Margin="0,0,6,0"/>
+                        <Button x:Name="PairSubmitButton" Content="配对并连接" Style="{StaticResource CenterPrimary}" IsDefault="True" Click="OnPairConnectClick"/>
+                    </StackPanel>
                 </StackPanel>
-            </Border>
-
-            <Border Grid.Row="2" Style="{StaticResource Card}">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="运行诊断" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,10"/>
-                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
-                        <Button Content="环境自检" Style="{StaticResource ToolButton}" Click="OnSelfTestClick" Margin="0,0,8,0"/>
-                        <Button Content="复制诊断信息" Style="{StaticResource ToolButton}" Click="OnCopyDiagnosticsClick" Margin="0,0,8,0"/>
-                        <Button Content="打开日志目录" Style="{StaticResource ToolButton}" Click="OnOpenLogFolderClick" Margin="0,0,8,0"/>
-                        <TextBlock Text="帧率是 scrcpy 引擎输出的解码帧率，不等于屏幕实际呈现帧率" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
-                    </StackPanel>
-                    <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="90"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="引擎帧率" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding FpsText}" FontSize="13" Margin="0,0,0,4"/>
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="画面尺寸" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding WindowInfo}" Margin="0,0,0,4"/>
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="工具条" VerticalAlignment="Center"/>
-                        <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
-                            <TextBlock Text="{Binding PassThroughText}" Margin="0,0,10,0"/>
-                            <TextBlock Text="·" Foreground="{StaticResource SubTextBrush}" Margin="0,0,10,0"/>
-                            <TextBlock Text="不透明度" Margin="0,0,10,0"/>
-                            <TextBlock Text="{Binding OpacityStateText}" Margin="0,0,10,0"/>
-                            <TextBlock Text="·" Foreground="{StaticResource SubTextBrush}" Margin="0,0,10,0"/>
-                            <TextBlock Text="置顶" Margin="0,0,6,0"/>
-                            <TextBlock Text="{Binding TopmostText}"/>
-                        </StackPanel>
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="版本" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding AppVersionText}"/>
-                    </Grid>
-                    <TextBox x:Name="LogBox" Style="{StaticResource MonoText}" TextWrapping="NoWrap"/>
-                </DockPanel>
             </Border>
         </Grid>
 
-        <!-- ============ 底部提示条 ============ -->
-        <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,12,0,0" Padding="12,8"
-                Background="#FFFFFFFF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="3">
-            <DockPanel>
-                <TextBlock DockPanel.Dock="Right" Text="退出程序会同时结束本次画面窗口，不会留下不可见的反控窗口。"
-                           Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
-                <TextBlock Text="{Binding Notice}" TextWrapping="Wrap" VerticalAlignment="Center"/>
-            </DockPanel>
-        </Border>
     </Grid>
 </Window>
