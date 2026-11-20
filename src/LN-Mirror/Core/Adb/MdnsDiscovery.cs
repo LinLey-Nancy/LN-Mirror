@@ -4,19 +4,63 @@ namespace LNMirror.Core.Adb;
 
 public enum MdnsServiceKind
 {
-    /// <summary>_adb-tls-connect._tcp：可以直接 adb connect 的端口。</summary>
+    /// <summary>_adb-tls-connect._tcp：无线调试的连接端口。广播本身不代表已配对。</summary>
     Connect,
 
     /// <summary>_adb-tls-pairing._tcp：只在手机打开配对对话框时出现，用于 adb pair。</summary>
     Pairing,
 }
 
-/// <summary>mDNS 发现到的一项无线调试服务。实例名形如 adb-xxxx，同一台手机的配对与连接服务共享实例名。</summary>
+/// <summary>mDNS 发现到的一项无线调试服务。配对与连接端口的实例名可能带不同后缀。</summary>
 public sealed record MdnsServiceInfo(string InstanceName, MdnsServiceKind Kind, string Address)
 {
-    public string KindText => Kind == MdnsServiceKind.Pairing ? "待配对" : "可连接";
+    public bool IsAuthorized { get; init; }
 
-    public string ActionText => Kind == MdnsServiceKind.Pairing ? "去配对" : "连接";
+    public string KindText => Kind == MdnsServiceKind.Pairing ? "待配对" : IsAuthorized ? "已授权" : "已发现";
+
+    public string ActionText => Kind == MdnsServiceKind.Pairing ? "去配对" : IsAuthorized ? "连接" : "如何配对";
+}
+
+internal static class WirelessDebuggingDiscovery
+{
+    public static MdnsServiceInfo[] GetDeviceRows(IReadOnlyList<MdnsServiceInfo> services)
+    {
+        var replacedAddresses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pairing in services.Where(service => service.Kind == MdnsServiceKind.Pairing))
+        {
+            var connection = FindConnectService(services, pairing.Address, pairing.InstanceName);
+            if (connection is not null) replacedAddresses.Add(connection.Address);
+        }
+
+        return services
+            .Where(service => service.Kind == MdnsServiceKind.Pairing || !replacedAddresses.Contains(service.Address))
+            .DistinctBy(service => (service.Kind, service.Address))
+            .OrderBy(service => GetHost(service.Address), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(service => service.Address, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public static MdnsServiceInfo? FindConnectService(
+        IReadOnlyList<MdnsServiceInfo> services, string pairingAddress, string? pairingInstance)
+    {
+        var host = GetHost(pairingAddress);
+        var candidates = services.Where(service => service.Kind == MdnsServiceKind.Connect
+            && !string.Equals(service.Address, pairingAddress, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(GetHost(service.Address), host, StringComparison.OrdinalIgnoreCase));
+
+        // ADB 的配对服务与连接服务可能各自带 mDNS 后缀。只有地址唯一时才按 IP 回退。
+        var exact = candidates.Where(service =>
+                string.Equals(service.InstanceName, pairingInstance, StringComparison.OrdinalIgnoreCase))
+            .DistinctBy(service => service.Address, StringComparer.OrdinalIgnoreCase)
+            .Take(2).ToArray();
+        if (exact.Length == 1) return exact[0];
+
+        var sameHost = candidates.DistinctBy(service => service.Address, StringComparer.OrdinalIgnoreCase)
+            .Take(2).ToArray();
+        return sameHost.Length == 1 ? sameHost[0] : null;
+    }
+
+    private static string GetHost(string address) => address[..address.LastIndexOf(':')];
 }
 
 /// <summary>解析 `adb mdns services` 的输出。输出为制表符/空格分隔的三列：实例名、服务类型、ip:port。</summary>

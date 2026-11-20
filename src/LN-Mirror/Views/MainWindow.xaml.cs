@@ -76,7 +76,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        await _controller.ConnectLanAsync(service.Address);
+        await _controller.ConnectDiscoveredLanAsync(service);
         ApplyPhaseVisual();
         if (_controller.IsConnected) _tray.ShowToolbar();
     }

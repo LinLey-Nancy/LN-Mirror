@@ -39,6 +39,8 @@ public sealed record AdbResult(int ExitCode, string StdOut, string StdErr)
 /// <summary>对内置 adb 的调用封装。只使用自己随包携带的这一份，不做全局 kill-server。</summary>
 public sealed class AdbClient
 {
+    internal const string WirelessPairingHint = "请在手机的“无线调试”中打开“使用配对码配对设备”，完成配对后再连接。";
+
     private readonly string _adbPath;
     private readonly string _adbDirectory;
 
@@ -189,25 +191,30 @@ public sealed class AdbClient
     /// <summary>connect 命令的输出判读。adb 即使失败也常返回退出码 0，必须看文本。</summary>
     public static bool IsConnectSuccess(AdbResult result)
     {
-        var text = result.Combined;
-        return text.Contains("connected to", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("already connected", StringComparison.OrdinalIgnoreCase);
+        return result.Ok && result.Combined.Split('\n', StringSplitOptions.TrimEntries).Any(line =>
+            line.StartsWith("connected to ", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("already connected to ", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>把 connect/pair 的失败输出归类成界面提示。</summary>
-    public static string DescribeConnectFailure(AdbResult result)
+    public static string DescribeConnectFailure(AdbResult result, bool wirelessDebugging = false)
     {
         var text = result.Combined;
+        if (text.Contains("authenticate", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
+            return wirelessDebugging
+                ? $"无线调试认证失败。{WirelessPairingHint}"
+                : $"认证失败。请在手机上确认调试授权。若使用无线调试，{WirelessPairingHint}";
         if (text.Contains("refused", StringComparison.OrdinalIgnoreCase))
             return "连接被拒绝：请确认手机已开启“无线调试”，且端口是“无线调试”主页显示的端口。";
         if (text.Contains("timed out", StringComparison.OrdinalIgnoreCase)
             || text.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("命令超时", StringComparison.Ordinal)
             || text.Contains("no route", StringComparison.OrdinalIgnoreCase)
             || text.Contains("unreachable", StringComparison.OrdinalIgnoreCase))
             return "连接超时或不可达：请检查电脑与手机是否在同一网段、路由器是否开了客户端隔离、防火墙是否拦截。";
-        if (text.Contains("authenticate", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
-            return "认证失败：配对信息可能已失效，请在手机上重新配对。";
+        if (wirelessDebugging)
+            return $"无线调试连接失败。若这台电脑尚未配对，{WirelessPairingHint}";
         if (text.Contains("failed", StringComparison.OrdinalIgnoreCase))
         {
             var line = FirstMeaningfulLine(text);
