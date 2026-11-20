@@ -1039,7 +1039,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private WirelessTarget UpdateLanHistory(AdbDevice device, WirelessTarget? target)
     {
         if (target?.InstanceName is null)
-            target = WirelessTarget.FromSerial(device.Serial, MdnsServices);
+        {
+            var observed = WirelessTarget.FromSerial(device.Serial, MdnsServices);
+            target = observed with { Address = observed.Address ?? target?.Address };
+        }
 
         var address = target.ResolveAddress(MdnsServices);
         // 只有已确认的身份才可以取代同一地址的已知设备。

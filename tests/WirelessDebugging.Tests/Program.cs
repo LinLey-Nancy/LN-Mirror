@@ -144,6 +144,17 @@ var cases = new (string Name, Action Check)[]
         RecordWirelessHistory(controller, connectAddress);
         Require(settings.LanDevices.Count == 1 && legacy.MdnsName == "adb-phone-TnSdi9");
     }),
+    ("多端点设备经 mDNS 串号连接后保留原历史的已确认地址", () =>
+    {
+        const string serial = "adb-phone-TnSdi9._adb-tls-connect._tcp";
+        var legacy = new LanDeviceEntry { LastAddress = connectAddress };
+        var settings = new AppSettings { LanDevices = [legacy] };
+        using var controller = new AppController(settings, Dispatcher.CurrentDispatcher);
+        SetWirelessSnapshots(controller, $"{serial} device", connectAdvertisement,
+            connectAdvertisement.Replace(connectAddress, "192.0.2.12:33015"));
+        RecordWirelessHistory(controller, connectAddress, serial);
+        Require(settings.LanDevices.Count == 1 && legacy.LastAddress == connectAddress && legacy.MdnsName == "adb-phone-TnSdi9");
+    }),
     ("无法核对同地址的设备身份时保留已有命名历史", () =>
     {
         var known = new LanDeviceEntry { LastAddress = connectAddress, MdnsName = "adb-phone-TnSdi9" };
@@ -515,12 +526,12 @@ static IReadOnlyList<MdnsServiceInfo> SetWirelessSnapshots(AppController control
     return services;
 }
 
-static void RecordWirelessHistory(AppController controller, string address)
+static void RecordWirelessHistory(AppController controller, string address, string? serial = null)
 {
     var targetType = typeof(MdnsMonitor).Assembly.GetType("LNMirror.Core.Adb.WirelessTarget")!;
     var target = Activator.CreateInstance(targetType, [address, null]);
     var update = typeof(AppController).GetMethod("UpdateLanHistory", BindingFlags.Instance | BindingFlags.NonPublic)!;
-    update.Invoke(controller, [new AdbDevice(address, "device", "Test", "", "", "1"), target]);
+    update.Invoke(controller, [new AdbDevice(serial ?? address, "device", "Test", "", "", "1"), target]);
 }
 
 static void SetHoverDelay(MirrorHoverWatcher watcher, int milliseconds, bool requireStillness)
