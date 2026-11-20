@@ -57,6 +57,38 @@ SettingsStore.ReadOnly = true;
 
 var cases = new (string Name, Action Check)[]
 {
+    ("同型号的不同设备不会被去重", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        var apply = typeof(AppController).GetMethod("OnDevicesSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        apply.Invoke(controller, [AdbClient.ParseDevices(
+            "unrelated-usb device model:Same\nadb-phone-TnSdi9._adb-tls-connect._tcp device model:Same")]);
+        Require(controller.Devices.Count == 2);
+    }),
+    ("连接发现设备优先复用已就绪的 mDNS 串号", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        var adb = new AdbClient(Environment.ProcessPath!);
+        var monitor = new DeviceMonitor(adb);
+        var mdns = new MdnsMonitor(adb);
+        typeof(DeviceMonitor).GetProperty(nameof(DeviceMonitor.Current))!.SetValue(monitor,
+            AdbClient.ParseDevices("adb-phone-TnSdi9._adb-tls-connect._tcp. device"));
+        var services = MdnsServicesParser.Parse(connectAdvertisement);
+        typeof(MdnsMonitor).GetProperty(nameof(MdnsMonitor.Current))!.SetValue(mdns, services);
+        SetControllerField(controller, "_adb", adb);
+        SetControllerField(controller, "_monitor", monitor);
+        SetControllerField(controller, "_mdns", mdns);
+        controller.ConnectDiscoveredLanAsync(services.Single()).GetAwaiter().GetResult();
+        Require(controller.Notice.Contains("内置 scrcpy 引擎不可用"));
+    }),
+    ("已知 mDNS 身份的历史设备不会直连未验证的旧端口", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        SetControllerField(controller, "_adb", new AdbClient(Environment.ProcessPath!));
+        var entry = new LanDeviceEntry { LastAddress = connectAddress, MdnsName = "adb-phone-TnSdi9" };
+        controller.ConnectHistoryAsync(entry).GetAwaiter().GetResult();
+        Require(controller.Notice.Contains("尚未发现"));
+    }),
     ("取消连接能中止尚未创建 scrcpy 会话的 ADB 操作", () =>
     {
         using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
@@ -70,9 +102,10 @@ var cases = new (string Name, Action Check)[]
     ("应用设置按活动会话的设备重连", () =>
     {
         using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
-        controller.Devices.Add(new AdbDevice(connectAddress, "device", "", "", "", "1"));
+        var active = new AdbDevice(connectAddress, "device", "", "", "", "1");
+        controller.Devices.Add(active);
         controller.SelectedDevice = new AdbDevice("other-phone", "offline", "", "", "", "2");
-        SetControllerField(controller, "_connectedSerial", connectAddress);
+        SetControllerField(controller, "_connectedDevice", active);
         SetControllerField(controller, "_phase", ConnectionPhase.Connected);
         controller.ApplyAndReconnectAsync("画质").GetAwaiter().GetResult();
         Require(controller.Notice.Contains("内置 scrcpy 引擎不可用"));
@@ -109,7 +142,7 @@ var cases = new (string Name, Action Check)[]
         try
         {
             var started = Environment.TickCount64;
-            var task = (Task<AdbDevice?>)wait.Invoke(controller, [connectAddress, duration, CancellationToken.None])!;
+            var task = (Task<AdbDevice?>)wait.Invoke(controller, [connectAddress, duration, CancellationToken.None, null])!;
             Require(task.GetAwaiter().GetResult()?.IsOffline == true);
             Require(Environment.TickCount64 - started >= 750);
         }

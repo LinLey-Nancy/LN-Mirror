@@ -44,9 +44,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     private ConnectionPhase _phase = ConnectionPhase.Idle;
     private AdbDevice? _selectedDevice;
-    private string? _connectedSerial;
+    private AdbDevice? _connectedDevice;
+    private WirelessTarget? _connectedWirelessTarget;
     private string _connectionMode;
-    private int _lanReconnecting;
+    private CancellationTokenSource? _reconnectCts;
     private (int Width, int Height)? _videoSize;
     private int _opacity;
     private int _effectiveOpacity;
@@ -147,6 +148,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             if (_settings.LanAutoReconnect == value) return;
             _settings.LanAutoReconnect = value;
+            if (!value && CancelReconnect() && !IsBusy) Notice = "已取消自动重连。";
             SaveSettings();
             OnPropertyChanged(nameof(LanAutoReconnect));
         }
@@ -195,7 +197,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public bool CanConnect => !_isBusy && !IsConnected && _selectedDevice is not null;
 
-    public bool CanDisconnect => _isBusy || IsConnected;
+    public bool CanDisconnect => IsBusy || IsConnected || _reconnectCts is { IsCancellationRequested: false };
+
+    public string ConnectedDeviceText => _connectedDevice?.DisplayName ?? string.Empty;
 
     public bool IsBusy
     {
@@ -541,12 +545,13 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         Phase = Devices.Count == 0 ? ConnectionPhase.NoDevice : _phase;
         AppLog.Info("[应用] 初始化完成");
 
-        if (AllowAutoReconnect
-            && _settings.LanAutoReconnect
-            && _settings.PreferredSerial is { } preferred
-            && preferred.Contains(':'))
+        if (AllowAutoReconnect && LanAutoReconnect && _settings.PreferredSerial is { } preferred
+            && AdbDevice.IsWirelessSerial(preferred))
         {
-            _ = TryStartupReconnectAsync(preferred);
+            var target = WirelessTarget.FromSerial(preferred, MdnsServices);
+            var history = FindLanHistory(target);
+            if (history is not null) target = TargetFromHistory(history);
+            _ = ReconnectAsync(preferred, target, startup: true);
         }
     }
 
@@ -569,47 +574,35 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         _dispatcher.Invoke(() =>
         {
-            var previous = SelectedDevice;
-
-            // 同一台手机可能同时以 mDNS 串号（adb-xxx._adb-tls-connect._tcp）和 IP/USB 串号出现两次。
-            // mDNS 串号不含冒号，选它连接会被误判成 USB 会话（不记录历史、不走局域网自动重连），
-            // 因此存在同型号的其它串号时不把它放进可选列表。
-            var display = devices
-                .Where(d => !IsDuplicateMdnsSerial(d, devices))
-                .ToList();
-
-            if (!Devices.SequenceEqual(display))
-            {
-                Devices.Clear();
-                foreach (var device in display) Devices.Add(device);
-            }
-
-            if (previous is not null)
-            {
-                SelectedDevice = Devices.FirstOrDefault(d => d.Serial == previous.Serial) ?? null;
-            }
-
-            if (SelectedDevice is null)
-            {
-                var preferred = Devices.FirstOrDefault(d => d.Serial == _settings.PreferredSerial);
-                SelectedDevice = preferred
-                    ?? Devices.FirstOrDefault(d => d.IsReady)
-                    ?? Devices.FirstOrDefault();
-            }
-
-            if (!IsConnected) RefreshPhaseFromDevice();
+            ApplyDeviceRows(devices, MdnsServices);
+            ApplyDiscoveredRows(MdnsServices);
         });
     }
 
-    private static bool IsDuplicateMdnsSerial(AdbDevice device, IReadOnlyList<AdbDevice> all)
+    private void ApplyDeviceRows(IReadOnlyList<AdbDevice> devices, IReadOnlyList<MdnsServiceInfo> services)
     {
-        if (!device.Serial.Contains("._adb-tls-connect._tcp", StringComparison.OrdinalIgnoreCase)) return false;
-        if (string.IsNullOrWhiteSpace(device.Model)) return false;
+        var previous = SelectedDevice;
+        var display = devices.Where(d => !IsDuplicateMdnsSerial(d, devices, services)).ToList();
+        if (!Devices.SequenceEqual(display))
+        {
+            Devices.Clear();
+            foreach (var device in display) Devices.Add(device);
+        }
 
-        return all.Any(other =>
-            !ReferenceEquals(other, device)
-            && !other.Serial.Contains("._adb-tls-connect._tcp", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(other.Model, device.Model, StringComparison.OrdinalIgnoreCase));
+        var preferred = previous?.Serial ?? _settings.PreferredSerial;
+        SelectedDevice = Devices.FirstOrDefault(d => d.Serial == preferred)
+            ?? Devices.FirstOrDefault(d => d.IsReady)
+            ?? Devices.FirstOrDefault();
+        if (!IsConnected) RefreshPhaseFromDevice();
+    }
+
+    private static bool IsDuplicateMdnsSerial(AdbDevice device, IReadOnlyList<AdbDevice> devices,
+        IReadOnlyList<MdnsServiceInfo> services)
+    {
+        if (AdbDevice.GetMdnsInstanceName(device.Serial) is not { } instance) return false;
+        var address = new WirelessTarget(null, instance).ResolveAddress(services);
+        return address is not null && devices.Any(d => d.IsReady
+            && string.Equals(d.Serial, address, StringComparison.OrdinalIgnoreCase));
     }
 
     private void OnDeviceChanged(AdbDevice device, AdbDevice? previous)
@@ -618,8 +611,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             AppLog.Info($"[设备] {device.DisplayName}：{previous?.State ?? "新设备"} → {device.State}");
 
-            if (IsConnected && _connectedSerial is not null
-                && device.Serial == _connectedSerial
+            if (IsConnected && device.Serial == _connectedDevice?.Serial
                 && device.State != "device")
             {
                 var reason = device.State switch
@@ -649,7 +641,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
         if (_selectedDevice is null)
         {
-            Phase = Devices.Count == 0 ? ConnectionPhase.NoDevice : ConnectionPhase.NoDevice;
+            Phase = ConnectionPhase.NoDevice;
             StatusLine = Devices.Count == 0 ? "未发现设备" : "请选择要连接的设备";
             return;
         }
@@ -678,40 +670,48 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     private CancellationToken LifetimeToken => _lifetimeCts?.Token ?? CancellationToken.None;
 
+    private IReadOnlyList<MdnsServiceInfo> MdnsServices => _mdns?.Current ?? Array.Empty<MdnsServiceInfo>();
+    private IReadOnlyList<AdbDevice> DeviceSnapshot => _monitor?.Current ?? Devices;
+
     private void OnMdnsSnapshot(IReadOnlyList<MdnsServiceInfo> services)
     {
         _dispatcher.Invoke(() =>
         {
-            var rows = WirelessDebuggingDiscovery.GetDeviceRows(services);
-            for (var i = 0; i < rows.Length; i++)
-            {
-                if (rows[i].Kind == MdnsServiceKind.Connect && HasAuthorizedTransport(rows[i]))
-                    rows[i] = rows[i] with { IsAuthorized = true };
-            }
-
-            if (DiscoveredLan.SequenceEqual(rows)) return;
-            DiscoveredLan.Clear();
-            foreach (var row in rows) DiscoveredLan.Add(row);
+            if (_monitor is { } monitor) ApplyDeviceRows(monitor.Current, services);
+            ApplyDiscoveredRows(services);
         });
+    }
+
+    private void ApplyDiscoveredRows(IReadOnlyList<MdnsServiceInfo> services)
+    {
+        var rows = WirelessDebuggingDiscovery.GetDeviceRows(services);
+        for (var i = 0; i < rows.Length; i++)
+        {
+            if (rows[i].Kind == MdnsServiceKind.Connect && HasAuthorizedTransport(rows[i]))
+                rows[i] = rows[i] with { IsAuthorized = true };
+        }
+
+        if (DiscoveredLan.SequenceEqual(rows)) return;
+        DiscoveredLan.Clear();
+        foreach (var row in rows) DiscoveredLan.Add(row);
     }
 
     private bool HasAuthorizedTransport(MdnsServiceInfo service)
     {
-        var mdnsSerial = $"{service.InstanceName}._adb-tls-connect._tcp";
-        return _monitor?.Current.Any(device => device.IsReady
-            && (string.Equals(device.Serial, service.Address, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(device.Serial.TrimEnd('.'), mdnsSerial, StringComparison.OrdinalIgnoreCase))) == true;
+        var target = new WirelessTarget(service.Address, service.InstanceName);
+        return DeviceSnapshot.Any(device => device.IsReady && target.Matches(device, service.Address));
     }
 
-    public async Task ConnectDiscoveredLanAsync(MdnsServiceInfo service)
+    public Task ConnectDiscoveredLanAsync(MdnsServiceInfo service)
     {
         if (!HasAuthorizedTransport(service))
         {
             Notice = "在手机的“无线调试”页面选择“使用配对码配对设备”，然后在这条设备记录上点“去配对”。";
-            return;
+            return Task.CompletedTask;
         }
 
-        await ConnectLanAsync(service.Address).ConfigureAwait(true);
+        if (GetAdbForLanRequest() is not { } adb) return Task.CompletedTask;
+        return RunConnectionAsync(ct => ConnectLanCoreAsync(adb, new(service.Address, service.InstanceName), ct));
     }
 
     public async Task RefreshLanDiscoveryAsync()
@@ -800,7 +800,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 return;
             }
 
-            await ConnectLanCoreAsync(adb, service.Address, ct);
+            await ConnectLanCoreAsync(adb, new(service.Address, service.InstanceName), ct);
         });
     }
 
@@ -826,37 +826,49 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             return Task.CompletedTask;
         }
 
-        return RunConnectionAsync(ct => ConnectLanCoreAsync(adb, address, ct));
+        return RunConnectionAsync(ct => ConnectLanCoreAsync(adb, WirelessTarget.FromSerial(address, MdnsServices), ct));
     }
 
-    private async Task ConnectLanCoreAsync(AdbClient adb, string address, CancellationToken ct)
+    private async Task ConnectLanCoreAsync(AdbClient adb, WirelessTarget target, CancellationToken ct)
     {
-        bool wirelessDebugging = _mdns?.Current.Any(service => service.Kind == MdnsServiceKind.Connect
-            && string.Equals(service.Address, address, StringComparison.OrdinalIgnoreCase)) == true;
+        var address = NormalizeLanAddress(target.ResolveAddress(MdnsServices));
+        var ready = DeviceSnapshot.FirstOrDefault(d => d.IsReady && target.Matches(d, address));
+        if (ready is not null)
+        {
+            SelectedDevice = ready;
+            await StartMirrorAsync(ready, ct, target);
+            return;
+        }
+
+        if (address is null)
+        {
+            FailConnection("尚未发现这台无线设备，请确认手机的无线调试仍开启。");
+            return;
+        }
 
         StatusLine = Notice = "正在连接局域网设备…";
         var result = await adb.ConnectAsync(address, ct);
         if (!AdbClient.IsConnectSuccess(result))
         {
-            FailConnection(AdbClient.DescribeConnectFailure(result, wirelessDebugging));
+            FailConnection(AdbClient.DescribeConnectFailure(result, target.InstanceName is not null));
             return;
         }
 
-        var device = await WaitForDeviceAsync(address, TimeSpan.FromSeconds(10), ct);
+        var device = await WaitForDeviceAsync(address, TimeSpan.FromSeconds(10), ct, target);
         if (device?.IsReady != true)
         {
-            FailConnection(wirelessDebugging
+            FailConnection(target.InstanceName is not null
                 ? $"无线调试设备未就绪。若这台电脑尚未配对，{AdbClient.WirelessPairingHint}"
                 : device?.StateDescription ?? "设备已响应但未出现在设备列表里，请在手机上确认无线调试仍开启。");
             return;
         }
         ct.ThrowIfCancellationRequested();
         SelectedDevice = device;
-        await StartMirrorAsync(device, ct);
+        await StartMirrorAsync(device, ct, target);
     }
 
     /// <summary>等待串号就绪，超时后返回最后一次看到的状态。</summary>
-    private async Task<AdbDevice?> WaitForDeviceAsync(string serial, TimeSpan timeout, CancellationToken ct)
+    private async Task<AdbDevice?> WaitForDeviceAsync(string serial, TimeSpan timeout, CancellationToken ct, WirelessTarget? wireless = null)
     {
         if (_adb is null) return null;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -871,9 +883,14 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                     var devices = _monitor is { } monitor
                         ? await monitor.RefreshAsync(deadline.Token)
                         : await _adb.GetDevicesAsync(deadline.Token);
-                    var device = devices.FirstOrDefault(d => string.Equals(d.Serial, serial, StringComparison.OrdinalIgnoreCase));
-                    if (device?.IsReady == true) return device;
-                    lastSeen = device ?? lastSeen;
+                    foreach (var device in devices)
+                    {
+                        var matches = wireless?.Matches(device, serial)
+                            ?? string.Equals(device.Serial, serial, StringComparison.OrdinalIgnoreCase);
+                        if (!matches) continue;
+                        if (device.IsReady) return device;
+                        lastSeen = device;
+                    }
                 }
                 catch (IOException ex)
                 {
@@ -888,22 +905,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         }
     }
 
-    /// <summary>连接历史设备：先试最近地址，失败时按 mDNS 实例名重新解析地址再试一次。</summary>
     public Task ConnectHistoryAsync(LanDeviceEntry? entry)
     {
         if (entry is null || GetAdbForLanRequest() is not { } adb) return Task.CompletedTask;
-
-        return RunConnectionAsync(async ct =>
-        {
-            await ConnectLanCoreAsync(adb, entry.LastAddress, ct);
-            if (IsConnected) return;
-
-            var resolved = _mdns?.Current.FirstOrDefault(s => s.Kind == MdnsServiceKind.Connect
-                && s.InstanceName == entry.MdnsName)?.Address;
-            if (resolved is null || string.Equals(resolved, entry.LastAddress, StringComparison.OrdinalIgnoreCase)) return;
-
-            await ConnectLanCoreAsync(adb, resolved, ct);
-        });
+        var target = TargetFromHistory(entry);
+        return RunConnectionAsync(ct => ConnectLanCoreAsync(adb, target, ct));
     }
 
     /// <summary>把已通过 USB 授权的设备切到 TCP/IP 调试（仅限可信局域网）。</summary>
@@ -941,253 +947,131 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             }
 
             await Task.Delay(1500, ct);
-            await ConnectLanCoreAsync(adb, address, ct);
+            await ConnectLanCoreAsync(adb, new(address, null), ct);
         });
     }
 
-    public async Task RemoveHistoryAsync(LanDeviceEntry? entry)
+    public Task RemoveHistoryAsync(LanDeviceEntry? entry)
     {
-        if (entry is null) return;
+        if (entry is null) return Task.CompletedTask;
 
-        if (_adb is not null && !string.IsNullOrWhiteSpace(entry.LastAddress))
+        if (_settings.PreferredSerial is { } preferred && AdbDevice.IsWirelessSerial(preferred)
+            && ReferenceEquals(FindLanHistory(WirelessTarget.FromSerial(preferred, MdnsServices)), entry))
         {
-            try
-            {
-                await _adb.DisconnectAsync(entry.LastAddress, LifetimeToken).ConfigureAwait(true);
-            }
-            catch (Exception ex)
-            {
-                AppLog.Debug($"[局域网] 断开 {entry.LastAddress} 时出错：{ex.Message}");
-            }
+            CancelReconnect();
+            _settings.PreferredSerial = null;
         }
-
-        _settings.LanDevices.RemoveAll(d => string.Equals(d.LastAddress, entry.LastAddress, StringComparison.OrdinalIgnoreCase));
+        _settings.LanDevices.Remove(entry);
         LanHistory.Remove(entry);
         SaveSettings();
         Notice = $"已移除局域网设备 {entry.Name}。";
+        return Task.CompletedTask;
     }
 
-    /// <summary>局域网连接成功后写入/更新历史设备。</summary>
-    private void UpdateLanHistory(AdbDevice device)
-    {
-        var serial = device.Serial;
-        var mdnsName = _mdns?.Current
-            .FirstOrDefault(s => s.Kind == MdnsServiceKind.Connect
-                                 && string.Equals(s.Address, serial, StringComparison.OrdinalIgnoreCase))
-            ?.InstanceName ?? string.Empty;
-        var name = string.IsNullOrWhiteSpace(device.Model) ? serial : device.Model;
+    private static WirelessTarget TargetFromHistory(LanDeviceEntry entry)
+        => new(entry.LastAddress, string.IsNullOrWhiteSpace(entry.MdnsName) ? null : entry.MdnsName);
 
-        var entry = _settings.LanDevices.FirstOrDefault(d =>
-            string.Equals(d.LastAddress, serial, StringComparison.OrdinalIgnoreCase)
-            || (mdnsName.Length > 0 && d.MdnsName == mdnsName));
+    private LanDeviceEntry? FindLanHistory(WirelessTarget target)
+    {
+        if (target.InstanceName is { } name)
+            return _settings.LanDevices.FirstOrDefault(d =>
+                string.Equals(d.MdnsName, name, StringComparison.OrdinalIgnoreCase));
+
+        return _settings.LanDevices.FirstOrDefault(d =>
+            string.Equals(d.LastAddress, target.Address, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void UpdateLanHistory(AdbDevice device, WirelessTarget target)
+    {
+        var address = target.ResolveAddress(MdnsServices);
+        var entry = FindLanHistory(target);
+        if (entry is null && address is not null)
+        {
+            entry = _settings.LanDevices.FirstOrDefault(d => string.IsNullOrEmpty(d.MdnsName)
+                && string.Equals(d.LastAddress, address, StringComparison.OrdinalIgnoreCase));
+        }
         if (entry is null)
         {
             entry = new LanDeviceEntry();
             _settings.LanDevices.Add(entry);
         }
 
-        entry.Name = name;
-        entry.LastAddress = serial;
-        if (mdnsName.Length > 0) entry.MdnsName = mdnsName;
+        entry.Name = string.IsNullOrWhiteSpace(device.Model) ? device.Serial : device.Model;
+        entry.LastAddress = address ?? entry.LastAddress;
+        entry.MdnsName = target.InstanceName ?? entry.MdnsName;
         entry.LastConnectedAt = DateTime.Now;
-
-        LanHistory.Clear();
-        foreach (var e in _settings.LanDevices.OrderByDescending(d => d.LastConnectedAt))
-        {
-            LanHistory.Add(e);
-        }
+        var index = LanHistory.IndexOf(entry);
+        if (index >= 0) LanHistory.RemoveAt(index);
+        LanHistory.Insert(0, entry);
     }
 
-    /// <summary>启动时自动重连上次的局域网设备（含直接恢复画面）。失败静默回到手动入口。</summary>
-    private async Task TryStartupReconnectAsync(string serial)
+    private bool CancelReconnect()
     {
+        if (_reconnectCts is not { IsCancellationRequested: false } reconnect) return false;
+        reconnect.Cancel();
+        OnPropertyChanged(nameof(CanDisconnect));
+        return true;
+    }
+
+    private async Task ReconnectAsync(string serial, WirelessTarget? target, bool startup = false, Task? afterStop = null)
+    {
+        if (!AllowAutoReconnect || !LanAutoReconnect || _disposed)
+        {
+            if (afterStop is not null) await afterStop;
+            return;
+        }
+
+        CancelReconnect();
+        using var reconnect = CancellationTokenSource.CreateLinkedTokenSource(LifetimeToken);
+        _reconnectCts = reconnect;
+        OnPropertyChanged(nameof(CanDisconnect));
+        var ct = reconnect.Token;
         try
         {
-            await Task.Delay(1500, LifetimeToken).ConfigureAwait(false);
-            if (LifetimeToken.IsCancellationRequested) return;
-
-            await _dispatcher.InvokeAsync(async () =>
+            if (afterStop is not null) await afterStop;
+            int[] delays = startup ? [1500, 2000, 2000, 2000, 2000, 2000]
+                : target is not null ? [5000, 10000, 20000] : [4000, 4000, 4000, 4000, 4000, 4000];
+            for (var i = 0; i < delays.Length; i++)
             {
+                ct.ThrowIfCancellationRequested();
                 if (IsConnected || IsBusy) return;
-                Notice = "正在自动重连上次的局域网设备…";
-                await ConnectLanAsync(serial).ConfigureAwait(true);
-            }).Task.Unwrap();
+                Notice = $"等待设备恢复，将自动重连（第 {i + 1}/{delays.Length} 次）…";
+                await Task.Delay(delays[i], ct);
+                if (IsConnected || IsBusy) return;
 
-            if (IsConnected)
-            {
-                AppLog.Info("[局域网] 启动自动重连成功");
-                return;
-            }
-
-            // 直连失败多半是端口已变化。mDNS 发现需要几秒，等待期间按实例名反复解析新地址
-            var entry = _settings.LanDevices.FirstOrDefault(d =>
-                string.Equals(d.LastAddress, serial, StringComparison.OrdinalIgnoreCase));
-
-            for (int i = 0; i < 5 && !IsConnected && !LifetimeToken.IsCancellationRequested; i++)
-            {
-                await Task.Delay(2000, LifetimeToken).ConfigureAwait(false);
-                await RefreshLanDiscoveryAsync().ConfigureAwait(false);
-
-                var resolved = entry?.MdnsName is { Length: > 0 } mdnsName
-                    ? _mdns?.Current.FirstOrDefault(s => s.Kind == MdnsServiceKind.Connect
-                                                         && s.InstanceName == mdnsName)?.Address
-                    : null;
-
-                if (resolved is null || string.Equals(resolved, serial, StringComparison.OrdinalIgnoreCase))
+                await RunConnectionAsync(async attemptToken =>
                 {
-                    continue;
-                }
-
-                AppLog.Info($"[局域网] 启动重连发现新地址：{serial} → {resolved}");
-                await _dispatcher.InvokeAsync(async () =>
-                {
-                    if (IsConnected || IsBusy) return;
-                    await ConnectLanAsync(resolved).ConfigureAwait(true);
-                }).Task.Unwrap();
-            }
-
-            if (IsConnected)
-            {
-                AppLog.Info("[局域网] 启动自动重连成功（地址已更新）");
-                return;
-            }
-
-            await _dispatcher.InvokeAsync(() =>
-                Notice = "自动重连未成功，可在“局域网”页签里手动连接。");
-        }
-        catch (Exception ex)
-        {
-            AppLog.Debug($"[局域网] 启动自动重连中止：{ex.Message}");
-        }
-    }
-
-    /// <summary>断线自动重连：5/10/20 秒退避最多 3 次；手动断开与授权撤销不走这里。</summary>
-    private async Task ReconnectLanLoopAsync(string serial)
-    {
-        if (Interlocked.Exchange(ref _lanReconnecting, 1) == 1) return;
-
-        try
-        {
-            AppLog.Info($"[局域网] 开始断线自动重连 {serial}（5/10/20 秒退避，最多 3 次）");
-            int[] delays = [5, 10, 20];
-            for (int i = 0; i < delays.Length; i++)
-            {
-                if (LifetimeToken.IsCancellationRequested) return;
-
-                var seconds = delays[i];
-                await _dispatcher.InvokeAsync(() =>
-                    Notice = $"局域网连接中断，{seconds} 秒后自动重连（第 {i + 1}/{delays.Length} 次）…");
-
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(seconds), LifetimeToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-
-                var connected = false;
-                await _dispatcher.InvokeAsync(async () =>
-                {
-                    if (IsConnected || IsBusy)
+                    if (target is not null && _adb is { } adb)
                     {
-                        connected = IsConnected;
+                        await ConnectLanCoreAsync(adb, target, attemptToken);
                         return;
                     }
 
-                    await ConnectLanAsync(serial).ConfigureAwait(true);
-                    connected = IsConnected;
-                }).Task.Unwrap();
-
-                if (connected)
-                {
-                    AppLog.Info($"[局域网] 断线自动重连成功（第 {i + 1} 次）");
-                    return;
-                }
-
-                AppLog.Info($"[局域网] 第 {i + 1} 次重连未成功");
-
-                // 地址可能已变化，按 mDNS 实例名重解析后下一轮用新地址
-                var entry = _settings.LanDevices.FirstOrDefault(d =>
-                    string.Equals(d.LastAddress, serial, StringComparison.OrdinalIgnoreCase));
-                var resolved = entry?.MdnsName is { Length: > 0 } mdnsName
-                    ? _mdns?.Current.FirstOrDefault(s => s.Kind == MdnsServiceKind.Connect
-                                                         && s.InstanceName == mdnsName)?.Address
-                    : null;
-                if (resolved is not null && !string.Equals(resolved, serial, StringComparison.OrdinalIgnoreCase))
-                {
-                    AppLog.Info($"[局域网] 重连时发现地址已变化：{serial} → {resolved}");
-                    serial = resolved;
-                }
-            }
-
-            await _dispatcher.InvokeAsync(() =>
-                Notice = "自动重连未成功：请确认手机“无线调试”仍开启、与电脑在同一网段、路由器未开启客户端隔离，然后手动连接。");
-            AppLog.Warn("[局域网] 断线自动重连 3 次均未成功");
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _lanReconnecting, 0);
-        }
-    }
-
-    /// <summary>USB 断线自动重连：只等本次掉线的同一串号重新就绪，有限次数后放弃。</summary>
-    private async Task ReconnectUsbLoopAsync(string serial)
-    {
-        if (Interlocked.Exchange(ref _lanReconnecting, 1) == 1) return;
-
-        try
-        {
-            for (int i = 0; i < 6; i++)
-            {
-                if (LifetimeToken.IsCancellationRequested) return;
-
-                var attempt = i + 1;
-                await _dispatcher.InvokeAsync(() =>
-                    Notice = $"连接中断，等待设备重新接入后自动重连（{attempt}/6）…");
-
-                AdbDevice? device;
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(4), LifetimeToken).ConfigureAwait(false);
-                    device = await WaitForDeviceAsync(serial, TimeSpan.FromSeconds(1), LifetimeToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-
-                if (device is not { IsReady: true }) continue;
-
-                var connected = false;
-                await _dispatcher.InvokeAsync(async () =>
-                {
-                    if (IsConnected || IsBusy)
-                    {
-                        connected = IsConnected;
-                        return;
-                    }
+                    var device = await WaitForDeviceAsync(serial, TimeSpan.FromSeconds(1), attemptToken);
+                    if (device?.IsReady != true) return;
 
                     SelectedDevice = device;
-                    await RunConnectionAsync(ct => StartMirrorAsync(device, ct));
-                    connected = IsConnected;
-                }).Task.Unwrap();
+                    await StartMirrorAsync(device, attemptToken);
+                }, ct);
 
-                if (connected)
-                {
-                    AppLog.Info("[设备] USB 断线自动重连成功");
-                    return;
-                }
+                ct.ThrowIfCancellationRequested();
+                if (IsConnected) return;
             }
 
-            await _dispatcher.InvokeAsync(() =>
-                Notice = "自动重连未成功：请重新插拔数据线或确认手机授权后手动连接。");
-            AppLog.Warn("[设备] USB 断线自动重连 6 次均未成功");
+            Notice = target is not null
+                ? "自动重连未成功，请确认手机的无线调试仍开启，或使用手动连接。"
+                : "自动重连未成功，请重新插拔数据线或确认手机授权。";
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
         }
         finally
         {
-            Interlocked.Exchange(ref _lanReconnecting, 0);
+            if (ReferenceEquals(_reconnectCts, reconnect))
+            {
+                _reconnectCts = null;
+                OnPropertyChanged(nameof(CanDisconnect));
+            }
         }
     }
 
@@ -1209,6 +1093,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         if (IsBusy || _disposed) return;
 
+        if (!retryToken.CanBeCanceled) CancelReconnect();
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(LifetimeToken, retryToken);
         _connectionCts = operation;
         IsBusy = true;
@@ -1241,7 +1126,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         Phase = ConnectionPhase.Failed;
     }
 
-    private async Task StartMirrorAsync(AdbDevice device, CancellationToken ct)
+    private async Task StartMirrorAsync(AdbDevice device, CancellationToken ct, WirelessTarget? target = null)
     {
         ct.ThrowIfCancellationRequested();
         if (!device.IsReady)
@@ -1296,11 +1181,18 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             _window.MoveToVisibleArea();
 
             if (_hoverRevealEnabled) _hoverWatcher.Start();
-            _settings.PreferredSerial = device.Serial;
-            if (device.Serial.Contains(':')) UpdateLanHistory(device);
+            if (options.IsWireless)
+            {
+                target ??= WirelessTarget.FromSerial(device.Serial, MdnsServices);
+                UpdateLanHistory(device, target);
+            }
+            _settings.PreferredSerial = target?.InstanceName is { } instance
+                ? instance + AdbDevice.MdnsSerialSuffix
+                : device.Serial;
             SaveSettings();
 
-            _connectedSerial = device.Serial;
+            _connectedDevice = device;
+            _connectedWirelessTarget = target;
             var bufferSummary = options.IsWireless ? $" · 视频缓冲 {options.VideoBufferMs} ms" : string.Empty;
             SessionParameters = $"{TransportName(device.Serial)} · {QualityProfile.Resolve(options.Quality).Summary}{bufferSummary}";
             StatusLine = $"{TransportName(device.Serial)} · {device.DisplayName} · 已连接";
@@ -1319,6 +1211,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public async Task DisconnectAsync(string reason = "已手动断开")
     {
+        if (CancelReconnect()) Notice = "已取消自动重连。";
         if (_connectionCts is { } operation)
         {
             operation.Cancel();
@@ -1343,7 +1236,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (savePlacement) SavePlacement();
         var session = _session;
         _session = null;
-        _connectedSerial = null;
+        _connectedDevice = null;
+        _connectedWirelessTarget = null;
         _window.Detach();
         _hoverWatcher.Stop();
         _hoverRevealActive = false;
@@ -1432,26 +1326,27 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         });
     }
 
-    private async Task HandleDroppedSessionAsync(ScrcpySession source, string reason, bool retry)
+    private Task HandleDroppedSessionAsync(ScrcpySession source, string reason, bool retry)
     {
-        if (!ReferenceEquals(_session, source)) return;
-        var serial = _connectedSerial;
+        if (!ReferenceEquals(_session, source)) return Task.CompletedTask;
+        var device = _connectedDevice;
+        var target = _connectedWirelessTarget;
+        var stopped = StopDroppedSessionAsync(reason);
+        return retry && device is not null ? ReconnectAsync(device.Serial, target, afterStop: stopped) : stopped;
+    }
+
+    private async Task StopDroppedSessionAsync(string reason)
+    {
         IsBusy = true;
         try
         {
             await EndSessionAsync(reason, ConnectionPhase.Idle);
-            Notice = reason;
+            if (_reconnectCts is not { IsCancellationRequested: true }) Notice = reason;
         }
         finally
         {
             IsBusy = false;
             RefreshPhaseFromDevice();
-        }
-
-        if (retry && serial is not null && _settings.LanAutoReconnect)
-        {
-            if (serial.Contains(':')) _ = ReconnectLanLoopAsync(serial);
-            else _ = ReconnectUsbLoopAsync(serial);
         }
     }
 
@@ -1637,56 +1532,18 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>档位、渲染后端、无边框等需要重启 scrcpy 的设置。</summary>
     public Task ApplyAndReconnectAsync(string reason)
     {
-        if (IsBusy || !IsConnected || _connectedSerial is not { } serial) return Task.CompletedTask;
-        var device = (_monitor?.Current ?? Devices).FirstOrDefault(d => d.Serial == serial);
+        if (IsBusy || !IsConnected || _connectedDevice is not { } device) return Task.CompletedTask;
+        var target = _connectedWirelessTarget;
 
         return RunConnectionAsync(async ct =>
         {
             await EndSessionAsync($"应用设置：{reason}", ConnectionPhase.Connecting);
             ct.ThrowIfCancellationRequested();
-            if (device is null)
-                FailConnection("当前投屏设备已离线，请重新连接。");
+            if (target is not null && _adb is { } adb)
+                await ConnectLanCoreAsync(adb, target, ct);
             else
                 await StartMirrorAsync(device, ct);
         });
-    }
-
-    public void SaveQuality(string key)
-    {
-        _settings.Quality = key;
-        OnPropertyChanged(nameof(QualityDisplay));
-        OnPropertyChanged(nameof(QualitySummary));
-        SaveSettings();
-    }
-
-    public void SaveRenderDriver(string driver)
-    {
-        _settings.RenderDriver = driver;
-        SaveSettings();
-    }
-
-    public void SaveBorderless(bool value)
-    {
-        _settings.Borderless = value;
-        SaveSettings();
-    }
-
-    public void SaveKeepAwake(bool value)
-    {
-        _settings.KeepAwake = value;
-        SaveSettings();
-    }
-
-    public void SaveVerifyPassThrough(bool value)
-    {
-        _settings.VerifyPassThroughOnSwitch = value;
-        SaveSettings();
-    }
-
-    public void SaveToolbarFollows(bool value)
-    {
-        _settings.ToolbarFollowsMirror = value;
-        SaveSettings();
     }
 
     public async Task UpdateHotKeysAsync(string restoreText, string passThroughText)
@@ -1786,6 +1643,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
         try
         {
+            CancelReconnect();
             _connectionCts?.Cancel();
             _stoppingSession?.ForceStop();
             _session?.Dispose();

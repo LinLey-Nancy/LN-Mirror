@@ -207,7 +207,7 @@ public static class SettingsStore
         }
 
         settings.LanDevices ??= [];
-        settings.LanDevices.RemoveAll(d => string.IsNullOrWhiteSpace(d.LastAddress));
+        settings.LanDevices.RemoveAll(d => string.IsNullOrWhiteSpace(d.LastAddress) && string.IsNullOrWhiteSpace(d.MdnsName));
         return settings;
     }
 }

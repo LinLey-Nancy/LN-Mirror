@@ -60,7 +60,7 @@ public partial class MainWindow : Window
             ConnectionPhase.Unauthorized => "请解锁手机，在弹窗中允许这台电脑。",
             ConnectionPhase.Offline => _controller.SelectedDeviceStateText,
             ConnectionPhase.Failed => _controller.StatusLine,
-            ConnectionPhase.Connected => _controller.SelectedDeviceText,
+            ConnectionPhase.Connected => _controller.ConnectedDeviceText,
             _ => string.Empty,
         };
         ConnectionDetail.Visibility = string.IsNullOrWhiteSpace(ConnectionDetail.Text)
@@ -347,7 +347,7 @@ public partial class MainWindow : Window
 
     private void OnControllerPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(AppController.Phase) or nameof(AppController.IsBusy)
+        if (e.PropertyName is nameof(AppController.Phase) or nameof(AppController.IsBusy) or nameof(AppController.CanDisconnect)
             or nameof(AppController.IsLanMode) or nameof(AppController.SelectedDevice)
             or nameof(AppController.Opacity) or nameof(AppController.EffectiveOpacity)
             or nameof(AppController.OpacityStateText) or nameof(AppController.HoverRevealHint)

@@ -6,6 +6,8 @@ namespace LNMirror.Core.Adb;
 
 public sealed record AdbDevice(string Serial, string State, string Model, string Product, string Device, string TransportId)
 {
+    internal const string MdnsSerialSuffix = "._adb-tls-connect._tcp";
+
     public bool IsReady => string.Equals(State, "device", StringComparison.OrdinalIgnoreCase);
 
     public bool IsUnauthorized => string.Equals(State, "unauthorized", StringComparison.OrdinalIgnoreCase);
@@ -13,7 +15,15 @@ public sealed record AdbDevice(string Serial, string State, string Model, string
     public bool IsOffline => string.Equals(State, "offline", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsWirelessSerial(string serial)
-        => serial.Contains(':') || serial.EndsWith("._adb-tls-connect._tcp", StringComparison.OrdinalIgnoreCase);
+        => serial.Contains(':') || GetMdnsInstanceName(serial) is not null;
+
+    internal static string? GetMdnsInstanceName(string serial)
+    {
+        var name = serial.TrimEnd('.');
+        return name.Length > MdnsSerialSuffix.Length && name.EndsWith(MdnsSerialSuffix, StringComparison.OrdinalIgnoreCase)
+            ? name[..^MdnsSerialSuffix.Length]
+            : null;
+    }
 
     public string DisplayName => string.IsNullOrWhiteSpace(Model) ? Serial : $"{Model} · {Serial}";
 
@@ -241,14 +251,6 @@ public sealed class AdbClient
         var result = await RunAsync(["pair", address, pairCode], ct).ConfigureAwait(false);
         var line = FirstMeaningfulLine(result.Combined);
         AppLog.Info($"[ADB] 无线调试配对 {address}：{line ?? result.ExitCode.ToString()}（配对码不记录）");
-        return result;
-    }
-
-    /// <summary>断开指定的局域网设备。</summary>
-    public async Task<AdbResult> DisconnectAsync(string address, CancellationToken ct)
-    {
-        var result = await RunAsync(["disconnect", address], ct).ConfigureAwait(false);
-        AppLog.Info($"[ADB] 断开局域网设备 {address}：{FirstMeaningfulLine(result.Combined) ?? result.ExitCode.ToString()}");
         return result;
     }
 
