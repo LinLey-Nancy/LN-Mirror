@@ -34,10 +34,10 @@ public sealed class ScrcpySession : IDisposable
     public bool IsRunning => _process is { HasExited: false };
 
     /// <summary>scrcpy 输出行（标准输出与错误合并）。</summary>
-    public event Action<string>? OutputLine;
+    public event Action<ScrcpySession, string>? OutputLine;
 
     /// <summary>进程退出，参数为退出码。</summary>
-    public event Action<int>? Exited;
+    public event Action<ScrcpySession, int>? Exited;
 
     public async Task<bool> StartAsync(ScrcpyStartOptions options, CancellationToken ct)
     {
@@ -175,7 +175,7 @@ public sealed class ScrcpySession : IDisposable
 
         _exitCode = code;
         AppLog.Info($"[会话] scrcpy 进程结束，退出码 {code}");
-        Exited?.Invoke(code);
+        Exited?.Invoke(this, code);
     }
 
     private async Task PumpAsync(StreamReader reader, string channel)
@@ -186,7 +186,7 @@ public sealed class ScrcpySession : IDisposable
             {
                 if (line.Length == 0) continue;
                 AppLog.Debug($"[scrcpy {channel}] {line}");
-                OutputLine?.Invoke(line);
+                OutputLine?.Invoke(this, line);
             }
         }
         catch

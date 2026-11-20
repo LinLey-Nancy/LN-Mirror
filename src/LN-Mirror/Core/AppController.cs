@@ -30,14 +30,6 @@ public enum ConnectionPhase
 /// </summary>
 public sealed class AppController : INotifyPropertyChanged, IDisposable
 {
-    private static readonly Regex[] FpsPatterns =
-    [
-        // 兼容不同版本的写法：59.9 fps / fps: 59.9 / Frame rate: 59.9
-        new(@"(?i)([0-9]+(?:\.[0-9]+)?)\s*fps\b", RegexOptions.Compiled),
-        new(@"(?i)\bfps\b\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", RegexOptions.Compiled),
-        new(@"(?i)frame\s*rate\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", RegexOptions.Compiled),
-    ];
-
     private readonly AppSettings _settings;
     private readonly MirrorWindowController _window = new();
     private readonly MirrorHoverWatcher _hoverWatcher;
@@ -63,6 +55,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private bool _passThrough;
     private bool _topmost;
     private double? _fps;
+    private long? _skippedFrames;
+    private string _sessionParameters = "—";
     private string _statusLine = "正在初始化…";
     private string _notice = string.Empty;
     private string _lastErrorLine = string.Empty;
@@ -321,6 +315,14 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public string FpsText => _fps is null ? "—" : $"{_fps:0.0}";
 
+    public string SkippedFramesText => _skippedFrames?.ToString() ?? "—";
+
+    public string SessionParameters
+    {
+        get => _sessionParameters;
+        private set => Set(ref _sessionParameters, value);
+    }
+
     public string WindowInfo
     {
         get => _windowInfo;
@@ -376,6 +378,22 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             OnPropertyChanged(nameof(Quality));
             OnPropertyChanged(nameof(QualityDisplay));
             OnPropertyChanged(nameof(QualitySummary));
+        }
+    }
+
+    public IReadOnlyList<int> WirelessBufferDurations => WirelessVideoBuffer.Durations;
+
+    public int WirelessVideoBufferMs
+    {
+        get => _settings.ResolvedWirelessVideoBufferMs;
+        set
+        {
+            value = WirelessVideoBuffer.Normalize(value);
+            if (WirelessVideoBufferMs == value) return;
+            _settings.WirelessVideoBufferMs = value;
+            _settings.WirelessSmoothPlayback = false;
+            SaveSettings();
+            OnPropertyChanged(nameof(WirelessVideoBufferMs));
         }
     }
 
@@ -559,8 +577,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 .Where(d => !IsDuplicateMdnsSerial(d, devices))
                 .ToList();
 
-            Devices.Clear();
-            foreach (var device in display) Devices.Add(device);
+            if (!Devices.SequenceEqual(display))
+            {
+                Devices.Clear();
+                foreach (var device in display) Devices.Add(device);
+            }
 
             if (previous is not null)
             {
@@ -661,7 +682,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     }
 
     private static string TransportName(string serial)
-        => serial.Contains(':') ? "局域网" : "USB";
+        => AdbDevice.IsWirelessSerial(serial) ? "局域网" : "USB";
 
     // ---------- 局域网 ----------
 
@@ -1320,6 +1341,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             {
                 Serial = device.Serial,
                 Quality = _settings.Quality,
+                WirelessVideoBufferMs = WirelessVideoBufferMs,
                 Borderless = _settings.Borderless,
                 RenderDriver = _settings.RenderDriver,
                 KeepAwake = _settings.KeepAwake,
@@ -1342,8 +1364,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 AppLog.Error($"[连接] 启动失败：{detail}");
                 Phase = ConnectionPhase.Failed;
                 Notice = "启动失败，日志里有完整原因。";
-                session.Dispose();
                 _session = null;
+                session.OutputLine -= OnScrcpyOutput;
+                session.Exited -= OnScrcpyExited;
+                session.Dispose();
+                ResetSessionDiagnostics();
                 return;
             }
 
@@ -1370,11 +1395,13 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
             Phase = ConnectionPhase.Connected;
             _connectedSerial = device.Serial;
+            var bufferSummary = options.IsWireless ? $" · 视频缓冲 {options.VideoBufferMs} ms" : string.Empty;
+            SessionParameters = $"{TransportName(device.Serial)} · {QualityProfile.Resolve(options.Quality).Summary}{bufferSummary}";
             StatusLine = $"{TransportName(device.Serial)} · {device.DisplayName} · 已连接";
             Notice = string.Empty;
             ToolbarVisible = true;
             PassThroughCheck = "尚未验证";
-            AppLog.Info($"[连接] 画面已建立：{device.DisplayName}");
+            AppLog.Info($"[连接] 画面已建立：{device.DisplayName} · {SessionParameters}");
         }
         catch (Exception ex)
         {
@@ -1417,10 +1444,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         _hoverWatcher.Stop();
         _hoverRevealActive = false;
         ToolbarVisible = false;
-        Fps = null;
-        VideoSize = null;
+        ResetSessionDiagnostics();
         MirrorMinimized = false;
-        WindowInfo = "—";
         _passThrough = false;
         _effectiveOpacity = _opacity;
         OnPropertyChanged(nameof(PassThroughText));
@@ -1443,16 +1468,18 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         _ = _dispatcher.InvokeAsync(async () => await EndSessionAsync(reason, nextPhase).ConfigureAwait(true));
     }
 
-    private void OnScrcpyOutput(string line)
+    private void OnScrcpyOutput(ScrcpySession source, string line)
     {
-        if (TryParseFps(line, out var value))
+        if (ScrcpyFrameSample.TryParse(line, out var sample))
         {
             // 这里绝不能同步 Invoke：scrcpy 的输出是在后台线程读的，
             // 同步等界面线程会让这个后台线程一直占着 Process 对象的锁，
             // 退出时界面线程正好要释放同一个对象，两边互等就把进程卡死。
             _ = _dispatcher.InvokeAsync(() =>
             {
-                Fps = value;
+                if (!ReferenceEquals(_session, source)) return;
+                Fps = sample.RenderedFps;
+                Set(ref _skippedFrames, (_skippedFrames ?? 0) + sample.SkippedFrames, nameof(SkippedFramesText));
                 var rect = _window.GetRect();
                 if (rect is not null)
                 {
@@ -1468,39 +1495,35 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             && int.TryParse(tex.Groups[2].Value, out var th)
             && tw > 0 && th > 0)
         {
-            _ = _dispatcher.InvokeAsync(() => VideoSize = (tw, th));
+            _ = _dispatcher.InvokeAsync(() =>
+            {
+                if (ReferenceEquals(_session, source)) VideoSize = (tw, th);
+            });
         }
 
-        if (line.Contains("ERROR", StringComparison.OrdinalIgnoreCase) || line.Contains("error:", StringComparison.OrdinalIgnoreCase))
+        if ((line.Contains("ERROR", StringComparison.OrdinalIgnoreCase) || line.Contains("error:", StringComparison.OrdinalIgnoreCase))
+            && ReferenceEquals(Volatile.Read(ref _session), source))
         {
             _lastErrorLine = line.Trim();
         }
     }
 
-    private static bool TryParseFps(string line, out double fps)
+    private void ResetSessionDiagnostics()
     {
-        foreach (var pattern in FpsPatterns)
-        {
-            var match = pattern.Match(line);
-            if (match.Success
-                && double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out fps))
-            {
-                return true;
-            }
-        }
-
-        fps = 0;
-        return false;
+        Fps = null;
+        Set(ref _skippedFrames, null, nameof(SkippedFramesText));
+        SessionParameters = "—";
+        VideoSize = null;
+        WindowInfo = "—";
     }
 
-    private void OnScrcpyExited(int exitCode)
+    private void OnScrcpyExited(ScrcpySession source, int exitCode)
     {
         // 同样不能用同步 Invoke：Exited 事件是在 Process 对象的内部锁下抛出的，
         // 这里同步等界面线程就会占着锁不放，退出时界面线程正好要释放这个对象。
         _ = _dispatcher.InvokeAsync(() =>
         {
-            if (!IsConnected && _session is null) return;
+            if (!ReferenceEquals(_session, source)) return;
 
             // 先记下掉线会话的串号：设备轮询可能随时把 SelectedDevice 改选到别的条目
             var droppedSerial = _connectedSerial;
@@ -1527,10 +1550,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
             _window.Detach();
             ToolbarVisible = false;
-            Fps = null;
-            VideoSize = null;
+            ResetSessionDiagnostics();
             MirrorMinimized = false;
-            WindowInfo = "—";
             _passThrough = false;
             OnPropertyChanged(nameof(PassThroughText));
             PassThroughCheck = "尚未验证";

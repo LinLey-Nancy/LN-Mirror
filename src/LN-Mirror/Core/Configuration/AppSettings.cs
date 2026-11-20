@@ -62,6 +62,16 @@ public sealed class AppSettings
 
     public string Quality { get; set; } = QualityNames.Balanced;
 
+    public int? WirelessVideoBufferMs { get; set; }
+
+    // 旧版平滑开关等价于 100 ms，读取时迁移到毫秒值。
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool WirelessSmoothPlayback { get; set; }
+
+    [JsonIgnore]
+    public int ResolvedWirelessVideoBufferMs
+        => WirelessVideoBuffer.Normalize(WirelessVideoBufferMs ?? (WirelessSmoothPlayback ? 100 : 0));
+
     public bool Borderless { get; set; } = true;
 
     /// <summary>auto / direct3d / opengl / software。透明不生效时切换 software 或 opengl 用于兼容验证。</summary>
@@ -104,9 +114,18 @@ public sealed class AppSettings
 
 public static class QualityNames
 {
+    public const string WirelessLowLoad = "WirelessLowLoad";
     public const string Smooth = "Smooth";
     public const string Balanced = "Balanced";
     public const string Sharp = "Sharp";
+}
+
+public static class WirelessVideoBuffer
+{
+    public static IReadOnlyList<int> Durations { get; } = [0, 25, 50, 75, 100, 150];
+
+    public static int Normalize(int milliseconds)
+        => Durations.Contains(milliseconds) ? milliseconds : 0;
 }
 
 public static class SettingsStore
@@ -171,6 +190,8 @@ public static class SettingsStore
     private static AppSettings Normalize(AppSettings settings)
     {
         settings.Version = 2;
+        settings.WirelessVideoBufferMs = settings.ResolvedWirelessVideoBufferMs;
+        settings.WirelessSmoothPlayback = false;
         settings.Opacity = Math.Clamp(settings.Opacity is >= 1 and <= 100 ? settings.Opacity : 100, 0, 100);
         settings.RestoreHotKey = string.IsNullOrWhiteSpace(settings.RestoreHotKey) ? "Ctrl+Alt+Shift+R" : settings.RestoreHotKey;
         settings.PassThroughHotKey = string.IsNullOrWhiteSpace(settings.PassThroughHotKey) ? "Ctrl+Alt+Shift+T" : settings.PassThroughHotKey;

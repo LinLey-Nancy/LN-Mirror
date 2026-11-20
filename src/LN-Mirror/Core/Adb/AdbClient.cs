@@ -12,6 +12,9 @@ public sealed record AdbDevice(string Serial, string State, string Model, string
 
     public bool IsOffline => string.Equals(State, "offline", StringComparison.OrdinalIgnoreCase);
 
+    public static bool IsWirelessSerial(string serial)
+        => serial.Contains(':') || serial.EndsWith("._adb-tls-connect._tcp", StringComparison.OrdinalIgnoreCase);
+
     public string DisplayName => string.IsNullOrWhiteSpace(Model) ? Serial : $"{Model} · {Serial}";
 
     /// <summary>给界面用的中文状态说明。unknown/offline/recovery 等状态不静默处理。</summary>

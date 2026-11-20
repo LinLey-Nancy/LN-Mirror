@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using LNMirror.Core.Adb;
 using LNMirror.Core.Configuration;
 using LNMirror.Core.Diagnostics;
 
@@ -9,11 +10,12 @@ public sealed record QualityProfile(string Key, string DisplayName, int MaxSize,
 {
     public string Summary => $"长边 {MaxSize} · 最高 {MaxFps} FPS · {BitRate}";
 
+    public static readonly QualityProfile WirelessLowLoad = new(QualityNames.WirelessLowLoad, "无线低负载", 1024, 30, "3M");
     public static readonly QualityProfile Smooth = new(QualityNames.Smooth, "流畅", 1280, 60, "4M");
     public static readonly QualityProfile Balanced = new(QualityNames.Balanced, "均衡（默认）", 1920, 60, "8M");
     public static readonly QualityProfile Sharp = new(QualityNames.Sharp, "清晰", 1920, 60, "12M");
 
-    public static IReadOnlyList<QualityProfile> All { get; } = [Smooth, Balanced, Sharp];
+    public static IReadOnlyList<QualityProfile> All { get; } = [WirelessLowLoad, Smooth, Balanced, Sharp];
 
     public static QualityProfile Resolve(string? key)
         => All.FirstOrDefault(p => string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase)) ?? Balanced;
@@ -24,6 +26,12 @@ public sealed record ScrcpyStartOptions
     public required string Serial { get; init; }
 
     public string Quality { get; init; } = QualityNames.Balanced;
+
+    public int WirelessVideoBufferMs { get; init; }
+
+    public bool IsWireless => AdbDevice.IsWirelessSerial(Serial);
+
+    public int VideoBufferMs => IsWireless ? WirelessVideoBuffer.Normalize(WirelessVideoBufferMs) : 0;
 
     public bool Borderless { get; init; } = true;
 
@@ -149,6 +157,7 @@ public sealed class ScrcpyRuntime
             $"--verbosity={options.Verbosity}",
         };
 
+        if (options.VideoBufferMs > 0) args.Add($"--video-buffer={options.VideoBufferMs}");
         if (options.PrintFps) args.Add("--print-fps");
         if (options.Borderless) args.Add("--window-borderless");
         if (options.KeepAwake) args.Add("--stay-awake");
