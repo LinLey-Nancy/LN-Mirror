@@ -44,12 +44,39 @@ if (args is ["pending-command"])
     return 0;
 }
 
+if (args is ["connect", "192.0.2.10:33016"])
+{
+    Thread.Sleep(5000);
+    Console.WriteLine("connected to 192.0.2.10:33016");
+    return 0;
+}
+
 if (args.Length > 0) return 2;
 
 SettingsStore.ReadOnly = true;
 
 var cases = new (string Name, Action Check)[]
 {
+    ("取消连接能中止尚未创建 scrcpy 会话的 ADB 操作", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        SetControllerField(controller, "_adb", new AdbClient(Environment.ProcessPath!));
+        var start = controller.ConnectLanAsync("192.0.2.10:33016");
+        Require(controller.CanDisconnect);
+        controller.DisconnectAsync().GetAwaiter().GetResult();
+        Require(start.Wait(TimeSpan.FromSeconds(2)));
+        Require(!controller.IsBusy && !controller.IsConnected && controller.Notice.Contains("取消"));
+    }),
+    ("应用设置按活动会话的设备重连", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        controller.Devices.Add(new AdbDevice(connectAddress, "device", "", "", "", "1"));
+        controller.SelectedDevice = new AdbDevice("other-phone", "offline", "", "", "", "2");
+        SetControllerField(controller, "_connectedSerial", connectAddress);
+        SetControllerField(controller, "_phase", ConnectionPhase.Connected);
+        controller.ApplyAndReconnectAsync("画质").GetAwaiter().GetResult();
+        Require(controller.Notice.Contains("内置 scrcpy 引擎不可用"));
+    }),
     ("设备查询失败保留最后一次成功快照", () =>
     {
         var monitor = new DeviceMonitor(new AdbClient(Environment.ProcessPath!));
@@ -82,7 +109,7 @@ var cases = new (string Name, Action Check)[]
         try
         {
             var started = Environment.TickCount64;
-            var task = (Task<AdbDevice?>)wait.Invoke(controller, [connectAddress, duration])!;
+            var task = (Task<AdbDevice?>)wait.Invoke(controller, [connectAddress, duration, CancellationToken.None])!;
             Require(task.GetAwaiter().GetResult()?.IsOffline == true);
             Require(Environment.TickCount64 - started >= 750);
         }

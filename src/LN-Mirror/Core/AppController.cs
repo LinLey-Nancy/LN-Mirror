@@ -59,7 +59,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private string _sessionParameters = "—";
     private string _statusLine = "正在初始化…";
     private string _notice = string.Empty;
-    private string _lastErrorLine = string.Empty;
+    private CancellationTokenSource? _connectionCts;
+    private ScrcpySession? _stoppingSession;
     private bool _isBusy;
     private bool _toolbarVisible;
     private string _passThroughCheck = "尚未验证";
@@ -628,21 +629,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                     "removed" => "设备已拔出，画面已停止",
                     _ => $"设备状态变为 {device.State}，画面已停止",
                 };
-                EndSession(reason, ConnectionPhase.NoDevice);
-                Notice = reason;
-
-                // 设备轮询往往比 scrcpy 退出码先发现断线，重连必须从这里触发；
-                // 授权被撤销属于用户主动行为，不自动重连
-                if (_settings.LanAutoReconnect && device.State is "removed" or "offline")
+                if (_session is { } session)
                 {
-                    if (device.Serial.Contains(':'))
-                    {
-                        _ = ReconnectLanLoopAsync(device.Serial);
-                    }
-                    else
-                    {
-                        _ = ReconnectUsbLoopAsync(device.Serial);
-                    }
+                    var retry = device.State is "removed" or "offline";
+                    _ = HandleDroppedSessionAsync(session, reason, retry);
                 }
             }
             else if (!IsConnected)
@@ -766,189 +756,110 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>adb pair 配对码配对，成功后自动连接并启动画面。</summary>
-    public async Task PairAndConnectAsync(string? pairAddress, string? pairCode)
+    public Task PairAndConnectAsync(string? pairAddress, string? pairCode)
     {
-        if (GetAdbForLanRequest() is not { } adb) return;
+        if (GetAdbForLanRequest() is not { } adb) return Task.CompletedTask;
 
         var address = NormalizeLanAddress(pairAddress);
         var code = (pairCode ?? string.Empty).Trim();
         if (address is null)
         {
             Notice = "配对地址格式应为 IP:端口，例如 192.168.1.5:37123。";
-            return;
+            return Task.CompletedTask;
         }
 
         if (code.Length < 4)
         {
             Notice = "请输入手机配对对话框里显示的配对码。";
-            return;
+            return Task.CompletedTask;
         }
 
-        IsBusy = true;
-        Phase = ConnectionPhase.Connecting;
-        StatusLine = "正在配对…";
-        Notice = StatusLine;
-
-        string? connectAddress = null;
-        string? failure = null;
-        try
+        return RunConnectionAsync(async ct =>
         {
-            // 配对窗口关闭后临时广播可能消失，提前记录实例名以便查找连接端口。
-            var instance = _mdns?.Current
-                .FirstOrDefault(s => s.Kind == MdnsServiceKind.Pairing
-                                     && string.Equals(s.Address, address, StringComparison.OrdinalIgnoreCase))
-                ?.InstanceName;
-
-            var result = await adb.PairAsync(address, code, LifetimeToken).ConfigureAwait(true);
+            StatusLine = Notice = "正在配对…";
+            // 配对对话框关闭后广播可能消失，先保存配对实例名。
+            var instance = _mdns?.Current.FirstOrDefault(s => s.Kind == MdnsServiceKind.Pairing
+                && string.Equals(s.Address, address, StringComparison.OrdinalIgnoreCase))?.InstanceName;
+            var result = await adb.PairAsync(address, code, ct);
             if (!result.Ok || !result.Combined.Split('\n', StringSplitOptions.TrimEntries)
                     .Any(line => line.StartsWith("Successfully paired to ", StringComparison.OrdinalIgnoreCase)))
             {
-                var line = result.Combined.Split('\n')
-                    .Select(l => l.Trim())
+                var line = result.Combined.Split('\n', StringSplitOptions.TrimEntries)
                     .FirstOrDefault(l => l.Length > 0 && !l.StartsWith('*'));
-                failure = line is not null && line.Contains("Wrong pairing code", StringComparison.OrdinalIgnoreCase)
+                FailConnection(line?.Contains("Wrong pairing code", StringComparison.OrdinalIgnoreCase) == true
                     ? "配对码错误，请核对手机配对对话框里的配对码后重试。"
-                    : $"配对失败：{line ?? "未知原因"}（配对对话框关闭后配对码会失效，需要重新打开）";
+                    : $"配对失败：{line ?? "未知原因"}（配对对话框关闭后请重新打开）");
+                return;
             }
-            else
+
+            AppLog.Info("[局域网] 配对成功");
+            var service = await ResolveConnectServiceAsync(address, instance, ct);
+            if (service is null)
             {
-                AppLog.Info("[局域网] 配对成功");
-                connectAddress = await ResolveConnectAddressAsync(address, instance).ConfigureAwait(true);
+                Notice = "配对成功。请在“手动连接”输入手机“无线调试”主页显示的 IP:端口（与配对端口不同），然后点连接。";
+                return;
             }
-        }
-        catch (OperationCanceledException) when (LifetimeToken.IsCancellationRequested)
-        {
-            return;
-        }
-        catch (Exception ex)
-        {
-            AppLog.Error("[局域网] 执行配对失败", ex);
-            failure = "配对出错，请重新打开手机上的配对码后再试。";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
 
-        if (failure is not null)
-        {
-            StatusLine = failure;
-            Phase = ConnectionPhase.Failed;
-            Notice = failure;
-            return;
-        }
-
-        if (connectAddress is null)
-        {
-            RefreshPhaseFromDevice();
-            Notice = "配对成功。请在“手动连接”输入手机“无线调试”主页显示的 IP:端口（与配对端口不同），然后点连接。";
-            return;
-        }
-
-        await ConnectLanAsync(connectAddress).ConfigureAwait(true);
+            await ConnectLanCoreAsync(adb, service.Address, ct);
+        });
     }
 
-    /// <summary>配对成功后找对应的连接端口。连接服务尚未出现时刷新一次。</summary>
-    private async Task<string?> ResolveConnectAddressAsync(string pairingAddress, string? instanceName)
+    private async Task<MdnsServiceInfo?> ResolveConnectServiceAsync(string pairingAddress, string? instanceName, CancellationToken ct)
     {
         if (_mdns is not { } mdns) return null;
 
         var found = WirelessDebuggingDiscovery.FindConnectService(mdns.Current, pairingAddress, instanceName);
-        if (found is not null) return found.Address;
+        if (found is not null) return found;
 
-        try
-        {
-            await Task.Delay(1200, LifetimeToken).ConfigureAwait(true);
-            await mdns.RefreshAsync(LifetimeToken).ConfigureAwait(true);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            AppLog.Debug($"[发现] 配对后刷新失败：{ex.Message}");
-        }
-
-        return WirelessDebuggingDiscovery.FindConnectService(mdns.Current, pairingAddress, instanceName)?.Address;
+        await Task.Delay(1200, ct);
+        await mdns.RefreshAsync(ct);
+        return WirelessDebuggingDiscovery.FindConnectService(mdns.Current, pairingAddress, instanceName);
     }
 
-    /// <summary>adb connect 一个局域网地址，成功后启动画面。</summary>
-    public async Task ConnectLanAsync(string? rawAddress)
+    public Task ConnectLanAsync(string? rawAddress)
     {
-        if (GetAdbForLanRequest() is not { } adb) return;
-
+        if (GetAdbForLanRequest() is not { } adb) return Task.CompletedTask;
         var address = NormalizeLanAddress(rawAddress);
         if (address is null)
         {
             Notice = "地址格式应为 IP:端口，例如 192.168.1.5:41537。";
-            return;
+            return Task.CompletedTask;
         }
 
+        return RunConnectionAsync(ct => ConnectLanCoreAsync(adb, address, ct));
+    }
+
+    private async Task ConnectLanCoreAsync(AdbClient adb, string address, CancellationToken ct)
+    {
         bool wirelessDebugging = _mdns?.Current.Any(service => service.Kind == MdnsServiceKind.Connect
             && string.Equals(service.Address, address, StringComparison.OrdinalIgnoreCase)) == true;
 
-        IsBusy = true;
-        Phase = ConnectionPhase.Connecting;
-        StatusLine = "正在连接局域网设备…";
-        Notice = StatusLine;
-
-        string? failure = null;
-        AdbDevice? device = null;
-        try
+        StatusLine = Notice = "正在连接局域网设备…";
+        var result = await adb.ConnectAsync(address, ct);
+        if (!AdbClient.IsConnectSuccess(result))
         {
-            var result = await adb.ConnectAsync(address, LifetimeToken).ConfigureAwait(true);
-            if (!AdbClient.IsConnectSuccess(result))
-            {
-                failure = AdbClient.DescribeConnectFailure(result, wirelessDebugging);
-            }
-            else
-            {
-                device = await WaitForDeviceAsync(address, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
-                if (wirelessDebugging && device?.IsReady != true)
-                {
-                    failure = $"无线调试设备未就绪。若这台电脑尚未配对，{AdbClient.WirelessPairingHint}";
-                }
-                else if (device is null)
-                {
-                    failure = "设备已响应但未出现在设备列表里，请在手机上确认无线调试仍开启。";
-                }
-                else if (!device.IsReady)
-                {
-                    failure = device.IsUnauthorized
-                        ? "设备已连接但未授权：请在手机上确认这台电脑的调试授权。"
-                        : device.StateDescription;
-                }
-            }
-        }
-        catch (OperationCanceledException) when (LifetimeToken.IsCancellationRequested)
-        {
-            return;
-        }
-        catch (Exception ex)
-        {
-            AppLog.Error("[局域网] 建立连接失败", ex);
-            failure = "连接出错，请查看日志。";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-
-        if (failure is not null || device is null)
-        {
-            StatusLine = failure ?? "连接失败。";
-            Phase = ConnectionPhase.Failed;
-            Notice = StatusLine;
+            FailConnection(AdbClient.DescribeConnectFailure(result, wirelessDebugging));
             return;
         }
 
+        var device = await WaitForDeviceAsync(address, TimeSpan.FromSeconds(10), ct);
+        if (device?.IsReady != true)
+        {
+            FailConnection(wirelessDebugging
+                ? $"无线调试设备未就绪。若这台电脑尚未配对，{AdbClient.WirelessPairingHint}"
+                : device?.StateDescription ?? "设备已响应但未出现在设备列表里，请在手机上确认无线调试仍开启。");
+            return;
+        }
+        ct.ThrowIfCancellationRequested();
         SelectedDevice = device;
-        await ConnectAsync().ConfigureAwait(true);
+        await StartMirrorAsync(device, ct);
     }
 
-    /// <summary>轮询设备列表，等待指定串号出现（最多 timeout）。</summary>
-    private async Task<AdbDevice?> WaitForDeviceAsync(string serial, TimeSpan timeout)
+    /// <summary>等待串号就绪，超时后返回最后一次看到的状态。</summary>
+    private async Task<AdbDevice?> WaitForDeviceAsync(string serial, TimeSpan timeout, CancellationToken ct)
     {
         if (_adb is null) return null;
-        var lifetime = LifetimeToken;
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(timeout);
         AdbDevice? lastSeen = null;
         try
@@ -958,8 +869,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 try
                 {
                     var devices = _monitor is { } monitor
-                        ? await monitor.RefreshAsync(deadline.Token).ConfigureAwait(true)
-                        : await _adb.GetDevicesAsync(deadline.Token).ConfigureAwait(true);
+                        ? await monitor.RefreshAsync(deadline.Token)
+                        : await _adb.GetDevicesAsync(deadline.Token);
                     var device = devices.FirstOrDefault(d => string.Equals(d.Serial, serial, StringComparison.OrdinalIgnoreCase));
                     if (device?.IsReady == true) return device;
                     lastSeen = device ?? lastSeen;
@@ -968,103 +879,70 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 {
                     AppLog.Debug($"[设备] 等待就绪时查询失败：{ex.Message}");
                 }
-                await Task.Delay(600, deadline.Token).ConfigureAwait(true);
+                await Task.Delay(600, deadline.Token);
             }
         }
-        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             return lastSeen;
         }
     }
 
     /// <summary>连接历史设备：先试最近地址，失败时按 mDNS 实例名重新解析地址再试一次。</summary>
-    public async Task ConnectHistoryAsync(LanDeviceEntry? entry)
+    public Task ConnectHistoryAsync(LanDeviceEntry? entry)
     {
-        if (entry is null || IsBusy || IsConnected) return;
+        if (entry is null || GetAdbForLanRequest() is not { } adb) return Task.CompletedTask;
 
-        await ConnectLanAsync(entry.LastAddress).ConfigureAwait(true);
-        if (IsConnected) return;
+        return RunConnectionAsync(async ct =>
+        {
+            await ConnectLanCoreAsync(adb, entry.LastAddress, ct);
+            if (IsConnected) return;
 
-        var resolved = _mdns?.Current.FirstOrDefault(s => s.Kind == MdnsServiceKind.Connect
-                                                          && s.InstanceName == entry.MdnsName)?.Address;
-        if (resolved is null || string.Equals(resolved, entry.LastAddress, StringComparison.OrdinalIgnoreCase)) return;
+            var resolved = _mdns?.Current.FirstOrDefault(s => s.Kind == MdnsServiceKind.Connect
+                && s.InstanceName == entry.MdnsName)?.Address;
+            if (resolved is null || string.Equals(resolved, entry.LastAddress, StringComparison.OrdinalIgnoreCase)) return;
 
-        AppLog.Info($"[局域网] {entry.Name} 地址已变化：{entry.LastAddress} → {resolved}，按新地址重试");
-        Notice = "设备地址已变化，正在按新地址重试…";
-        await ConnectLanAsync(resolved).ConfigureAwait(true);
+            await ConnectLanCoreAsync(adb, resolved, ct);
+        });
     }
 
-    /// <summary>备用路径：把已通过 USB 授权的设备切到 TCP/IP 调试（默认 5555 端口），再按手机 IP 直连。仅限可信局域网。</summary>
-    public async Task SwitchUsbToLanAsync(string? rawHost)
+    /// <summary>把已通过 USB 授权的设备切到 TCP/IP 调试（仅限可信局域网）。</summary>
+    public Task SwitchUsbToLanAsync(string? rawHost)
     {
-        if (_adb is null || IsBusy || IsConnected) return;
+        if (GetAdbForLanRequest() is not { } adb) return Task.CompletedTask;
 
         var host = (rawHost ?? string.Empty).Trim();
-        string? address = null;
-        var port = 5555;
-        if (host.Length > 0 && !host.Contains(' ') && host.IndexOf(':') < 0)
-        {
-            address = $"{host}:{port}";
-        }
-        else if (host.Length > 0)
-        {
-            address = NormalizeLanAddress(host);
-            if (address is not null)
-            {
-                port = int.Parse(address[(address.LastIndexOf(':') + 1)..], System.Globalization.CultureInfo.InvariantCulture);
-            }
-        }
-
+        var address = NormalizeLanAddress(host.Contains(':') ? host : $"{host}:5555");
         if (address is null)
         {
             Notice = "请输入手机 IP，例如 192.168.1.5（也可带端口）。";
-            return;
+            return Task.CompletedTask;
         }
 
-        var usb = SelectedDevice is { IsReady: true } selected && !selected.Serial.Contains(':')
+        var usb = SelectedDevice is { IsReady: true } selected && !AdbDevice.IsWirelessSerial(selected.Serial)
             ? selected
-            : Devices.FirstOrDefault(d => d.IsReady && !d.Serial.Contains(':'));
+            : Devices.FirstOrDefault(d => d.IsReady && !AdbDevice.IsWirelessSerial(d.Serial));
         if (usb is null)
         {
             Notice = "请先用数据线连接已授权的手机，再执行切换。";
-            return;
+            return Task.CompletedTask;
         }
 
-        IsBusy = true;
-        Phase = ConnectionPhase.Connecting;
-        StatusLine = $"正在把 {usb.DisplayName} 切换到 TCP/IP…";
-        Notice = string.Empty;
+        var port = int.Parse(address[(address.LastIndexOf(':') + 1)..], System.Globalization.CultureInfo.InvariantCulture);
+        return RunConnectionAsync(async ct =>
+        {
+            StatusLine = $"正在把 {usb.DisplayName} 切换到 TCP/IP…";
+            Notice = string.Empty;
+            var result = await adb.EnableTcpIpAsync(usb.Serial, port, ct);
+            if (!result.Ok)
+            {
+                FailConnection("切换 TCP/IP 失败，请查看日志。");
+                return;
+            }
 
-        AdbResult switchResult;
-        try
-        {
-            switchResult = await _adb.EnableTcpIpAsync(usb.Serial, port, LifetimeToken).ConfigureAwait(true);
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-
-        if (!switchResult.Ok)
-        {
-            StatusLine = "切换 TCP/IP 失败，请查看日志。";
-            Phase = ConnectionPhase.Failed;
-            Notice = StatusLine;
-            return;
-        }
-
-        // 切换后设备会先断开再监听端口，稍等再连
-        try
-        {
-            await Task.Delay(1500, LifetimeToken).ConfigureAwait(true);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-
-        Notice = "已切换 TCP/IP，正在连接…";
-        await ConnectLanAsync(address).ConfigureAwait(true);
+            await Task.Delay(1500, ct);
+            await ConnectLanCoreAsync(adb, address, ct);
+        });
     }
 
     public async Task RemoveHistoryAsync(LanDeviceEntry? entry)
@@ -1112,7 +990,6 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         entry.LastAddress = serial;
         if (mdnsName.Length > 0) entry.MdnsName = mdnsName;
         entry.LastConnectedAt = DateTime.Now;
-        SaveSettings();
 
         LanHistory.Clear();
         foreach (var e in _settings.LanDevices.OrderByDescending(d => d.LastConnectedAt))
@@ -1274,7 +1151,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 try
                 {
                     await Task.Delay(TimeSpan.FromSeconds(4), LifetimeToken).ConfigureAwait(false);
-                    device = await WaitForDeviceAsync(serial, TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                    device = await WaitForDeviceAsync(serial, TimeSpan.FromSeconds(1), LifetimeToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1292,8 +1169,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                         return;
                     }
 
-                    SelectedDevice = Devices.FirstOrDefault(d => d.Serial == serial) ?? SelectedDevice;
-                    await ConnectAsync().ConfigureAwait(true);
+                    SelectedDevice = device;
+                    await RunConnectionAsync(ct => StartMirrorAsync(device, ct));
                     connected = IsConnected;
                 }).Task.Unwrap();
 
@@ -1316,73 +1193,95 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     // ---------- 连接 ----------
 
-    public async Task ConnectAsync()
+    public Task ConnectAsync()
     {
-        if (IsConnected || IsBusy) return;
-
-        var device = SelectedDevice;
-        if (device is null)
+        if (IsConnected || IsBusy) return Task.CompletedTask;
+        if (SelectedDevice is not { } device)
         {
             Notice = "请先选择设备。";
-            return;
+            return Task.CompletedTask;
         }
 
+        return RunConnectionAsync(ct => StartMirrorAsync(device, ct));
+    }
+
+    private async Task RunConnectionAsync(Func<CancellationToken, Task> connect, CancellationToken retryToken = default)
+    {
+        if (IsBusy || _disposed) return;
+
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(LifetimeToken, retryToken);
+        _connectionCts = operation;
+        IsBusy = true;
+        Phase = ConnectionPhase.Connecting;
+        try
+        {
+            operation.Token.ThrowIfCancellationRequested();
+            await connect(operation.Token);
+        }
+        catch (OperationCanceledException) when (operation.IsCancellationRequested)
+        {
+            Notice = "已取消连接。";
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("[连接] 建立会话时出错", ex);
+            FailConnection("连接出错，请查看日志。");
+        }
+        finally
+        {
+            _connectionCts = null;
+            IsBusy = false;
+            if (Phase == ConnectionPhase.Connecting) RefreshPhaseFromDevice();
+        }
+    }
+
+    private void FailConnection(string message)
+    {
+        StatusLine = Notice = message;
+        Phase = ConnectionPhase.Failed;
+    }
+
+    private async Task StartMirrorAsync(AdbDevice device, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
         if (!device.IsReady)
         {
-            RefreshPhaseFromDevice();
             Notice = device.StateDescription;
             return;
         }
-
         if (_runtime is null || _adb is null)
         {
             Notice = "内置 scrcpy 引擎不可用，无法连接。";
             return;
         }
 
-        IsBusy = true;
-        Phase = ConnectionPhase.Connecting;
-        _lastErrorLine = string.Empty;
+        StatusLine = Notice = "正在启动画面…";
+        var placement = _settings.MirrorPlacement;
+        var options = new ScrcpyStartOptions
+        {
+            Serial = device.Serial,
+            Quality = _settings.Quality,
+            WirelessVideoBufferMs = WirelessVideoBufferMs,
+            Borderless = _settings.Borderless,
+            RenderDriver = _settings.RenderDriver,
+            KeepAwake = _settings.KeepAwake,
+            WindowX = placement is { HasValue: true } p ? p.X : null,
+            WindowY = placement is { HasValue: true } p2 ? p2.Y : null,
+            WindowWidth = placement is { Width: > 0 } p3 ? p3.Width : null,
+        };
 
+        var session = new ScrcpySession(_runtime);
+        session.OutputLine += OnScrcpyOutput;
+        session.Exited += OnScrcpyExited;
+        _session = session;
         try
         {
-            await EndSessionAsync("重新连接", ConnectionPhase.Connecting, keepSelected: true).ConfigureAwait(true);
-            StatusLine = "正在启动画面…";
-            Notice = StatusLine;
-
-            var placement = _settings.MirrorPlacement;
-            var options = new ScrcpyStartOptions
-            {
-                Serial = device.Serial,
-                Quality = _settings.Quality,
-                WirelessVideoBufferMs = WirelessVideoBufferMs,
-                Borderless = _settings.Borderless,
-                RenderDriver = _settings.RenderDriver,
-                KeepAwake = _settings.KeepAwake,
-                WindowX = placement is { HasValue: true } p ? p.X : null,
-                WindowY = placement is { HasValue: true } p2 ? p2.Y : null,
-                WindowWidth = placement is { Width: > 0 } p3 ? p3.Width : null,
-            };
-
-            var session = new ScrcpySession(_runtime);
-            session.OutputLine += OnScrcpyOutput;
-            session.Exited += OnScrcpyExited;
-            _session = session;
-
-            bool ok = await session.StartAsync(options, _lifetimeCts?.Token ?? CancellationToken.None).ConfigureAwait(true);
-
+            bool ok = await session.StartAsync(options, ct);
+            ct.ThrowIfCancellationRequested();
             if (!ok || !session.IsRunning)
             {
-                var detail = string.IsNullOrWhiteSpace(_lastErrorLine) ? "未取得画面，请查看日志" : _lastErrorLine;
-                StatusLine = $"启动失败：{detail}";
-                AppLog.Error($"[连接] 启动失败：{detail}");
-                Phase = ConnectionPhase.Failed;
-                Notice = "启动失败，日志里有完整原因。";
-                _session = null;
-                session.OutputLine -= OnScrcpyOutput;
-                session.Exited -= OnScrcpyExited;
-                session.Dispose();
-                ResetSessionDiagnostics();
+                var detail = session.LastErrorLine ?? "未取得画面，请查看日志";
+                FailConnection($"启动失败：{detail}");
                 return;
             }
 
@@ -1390,7 +1289,6 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             _passThrough = false;
             _window.ApplyTopmost(_topmost);
             _window.ApplyPassThrough(false);
-            // 系统边框与任务栏图标都在运行时处理，勾选后立刻能看到效果
             _window.ApplyBorderless(_settings.Borderless);
             _window.ApplyToolWindow(true);
             _hoverRevealActive = false;
@@ -1398,16 +1296,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             _window.MoveToVisibleArea();
 
             if (_hoverRevealEnabled) _hoverWatcher.Start();
-
             _settings.PreferredSerial = device.Serial;
+            if (device.Serial.Contains(':')) UpdateLanHistory(device);
             SaveSettings();
 
-            if (device.Serial.Contains(':'))
-            {
-                UpdateLanHistory(device);
-            }
-
-            Phase = ConnectionPhase.Connected;
             _connectedSerial = device.Serial;
             var bufferSummary = options.IsWireless ? $" · 视频缓冲 {options.VideoBufferMs} ms" : string.Empty;
             SessionParameters = $"{TransportName(device.Serial)} · {QualityProfile.Resolve(options.Quality).Summary}{bufferSummary}";
@@ -1415,45 +1307,43 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             Notice = string.Empty;
             ToolbarVisible = true;
             PassThroughCheck = "尚未验证";
+            Phase = ConnectionPhase.Connected;
             AppLog.Info($"[连接] 画面已建立：{device.DisplayName} · {SessionParameters}");
-        }
-        catch (Exception ex)
-        {
-            AppLog.Error("[连接] 建立会话时出错", ex);
-            StatusLine = $"连接出错：{ex.Message}";
-            Phase = ConnectionPhase.Failed;
-            Notice = StatusLine;
         }
         finally
         {
-            IsBusy = false;
+            if (!IsConnected && ReferenceEquals(_session, session))
+                await EndSessionAsync(StatusLine, Phase, savePlacement: false);
         }
     }
 
     public async Task DisconnectAsync(string reason = "已手动断开")
     {
-        if (!IsConnected && _session is null) return;
+        if (_connectionCts is { } operation)
+        {
+            operation.Cancel();
+            return;
+        }
+
+        if (IsBusy || (!IsConnected && _session is null)) return;
         IsBusy = true;
-        await EndSessionAsync(reason, ConnectionPhase.Idle).ConfigureAwait(true);
-        IsBusy = false;
-        RefreshPhaseFromDevice();
+        try
+        {
+            await EndSessionAsync(reason, ConnectionPhase.Idle);
+        }
+        finally
+        {
+            IsBusy = false;
+            RefreshPhaseFromDevice();
+        }
     }
 
-    private async Task EndSessionAsync(string reason, ConnectionPhase nextPhase, bool keepSelected = false)
+    private async Task EndSessionAsync(string reason, ConnectionPhase nextPhase, bool savePlacement = true)
     {
-        SavePlacement();
-
+        if (savePlacement) SavePlacement();
         var session = _session;
         _session = null;
         _connectedSerial = null;
-        if (session is not null)
-        {
-            session.OutputLine -= OnScrcpyOutput;
-            session.Exited -= OnScrcpyExited;
-            session.Stop();
-            session.Dispose();
-        }
-
         _window.Detach();
         _hoverWatcher.Stop();
         _hoverRevealActive = false;
@@ -1463,23 +1353,21 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         _passThrough = false;
         _effectiveOpacity = _opacity;
         OnPropertyChanged(nameof(PassThroughText));
-        OnPropertyChanged(nameof(PassThroughEnabled));
-        OnPropertyChanged(nameof(OpacityEnabled));
         OnPropertyChanged(nameof(EffectiveOpacity));
         OnPropertyChanged(nameof(OpacityStateText));
         PassThroughCheck = "尚未验证";
-
-        AppLog.Info($"[会话] 结束（{reason}）");
         StatusLine = reason;
         Phase = nextPhase;
 
-        if (!keepSelected) RefreshPhaseFromDevice();
-        await Task.CompletedTask;
-    }
-
-    private void EndSession(string reason, ConnectionPhase nextPhase)
-    {
-        _ = _dispatcher.InvokeAsync(async () => await EndSessionAsync(reason, nextPhase).ConfigureAwait(true));
+        if (session is not null)
+        {
+            session.OutputLine -= OnScrcpyOutput;
+            session.Exited -= OnScrcpyExited;
+            _stoppingSession = session;
+            try { await Task.Run(session.Dispose); }
+            finally { _stoppingSession = null; }
+        }
+        AppLog.Info($"[会话] 结束（{reason}）");
     }
 
     private void OnScrcpyOutput(ScrcpySession source, string line)
@@ -1515,11 +1403,6 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             });
         }
 
-        if ((line.Contains("ERROR", StringComparison.OrdinalIgnoreCase) || line.Contains("error:", StringComparison.OrdinalIgnoreCase))
-            && ReferenceEquals(Volatile.Read(ref _session), source))
-        {
-            _lastErrorLine = line.Trim();
-        }
     }
 
     private void ResetSessionDiagnostics()
@@ -1533,61 +1416,43 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     private void OnScrcpyExited(ScrcpySession source, int exitCode)
     {
-        // 同样不能用同步 Invoke：Exited 事件是在 Process 对象的内部锁下抛出的，
-        // 这里同步等界面线程就会占着锁不放，退出时界面线程正好要释放这个对象。
+        // Process.Exited 在进程内部锁下触发，异步转发到界面线程。
         _ = _dispatcher.InvokeAsync(() =>
         {
-            if (!ReferenceEquals(_session, source)) return;
-
-            // 先记下掉线会话的串号：设备轮询可能随时把 SelectedDevice 改选到别的条目
-            var droppedSerial = _connectedSerial;
-            _connectedSerial = null;
-
+            if (!IsConnected || !ReferenceEquals(_session, source)) return;
             var reason = exitCode switch
             {
                 2 => "设备连接中断，画面已停止",
-                1 => "画面启动失败，请查看日志",
+                1 => "画面进程异常结束，请查看日志",
                 0 => "画面窗口已被关闭，会话结束",
                 _ => $"画面进程异常结束（退出码 {exitCode}）",
             };
 
-            var session = _session;
-            _session = null;
-            if (session is not null)
-            {
-                session.OutputLine -= OnScrcpyOutput;
-                session.Exited -= OnScrcpyExited;
-                // Process.Exited 是在 Process 内部锁下抛出的：在事件链里同步 Dispose 进程对象
-                // 会与抛出线程抢同一把锁形成死锁（实测卡死整个界面线程）。放到后台线程释放。
-                Task.Run(() => session.Dispose());
-            }
-
-            _window.Detach();
-            ToolbarVisible = false;
-            ResetSessionDiagnostics();
-            MirrorMinimized = false;
-            _passThrough = false;
-            OnPropertyChanged(nameof(PassThroughText));
-            PassThroughCheck = "尚未验证";
-
-            StatusLine = reason;
-            Phase = exitCode == 0 ? ConnectionPhase.Idle : ConnectionPhase.NoDevice;
-            RefreshPhaseFromDevice();
-            Notice = reason;
-
-            // 仅异常断线（退出码 2）时自动重连；手动断开在入口已提前返回，不会走到这里
-            if (exitCode == 2 && droppedSerial is not null && _settings.LanAutoReconnect)
-            {
-                if (droppedSerial.Contains(':'))
-                {
-                    _ = ReconnectLanLoopAsync(droppedSerial);
-                }
-                else
-                {
-                    _ = ReconnectUsbLoopAsync(droppedSerial);
-                }
-            }
+            _ = HandleDroppedSessionAsync(source, reason, retry: exitCode == 2);
         });
+    }
+
+    private async Task HandleDroppedSessionAsync(ScrcpySession source, string reason, bool retry)
+    {
+        if (!ReferenceEquals(_session, source)) return;
+        var serial = _connectedSerial;
+        IsBusy = true;
+        try
+        {
+            await EndSessionAsync(reason, ConnectionPhase.Idle);
+            Notice = reason;
+        }
+        finally
+        {
+            IsBusy = false;
+            RefreshPhaseFromDevice();
+        }
+
+        if (retry && serial is not null && _settings.LanAutoReconnect)
+        {
+            if (serial.Contains(':')) _ = ReconnectLanLoopAsync(serial);
+            else _ = ReconnectUsbLoopAsync(serial);
+        }
     }
 
     // ---------- 外观与交互 ----------
@@ -1770,17 +1635,20 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>档位、渲染后端、无边框等需要重启 scrcpy 的设置。</summary>
-    public async Task ApplyAndReconnectAsync(string reason)
+    public Task ApplyAndReconnectAsync(string reason)
     {
-        SaveSettings();
-        Notice = $"{reason} 将重新连接画面以生效。";
-        if (IsConnected)
+        if (IsBusy || !IsConnected || _connectedSerial is not { } serial) return Task.CompletedTask;
+        var device = (_monitor?.Current ?? Devices).FirstOrDefault(d => d.Serial == serial);
+
+        return RunConnectionAsync(async ct =>
         {
-            var device = SelectedDevice;
-            await EndSessionAsync($"应用设置：{reason}", ConnectionPhase.Idle, keepSelected: true).ConfigureAwait(true);
-            SelectedDevice = device;
-            await ConnectAsync().ConfigureAwait(true);
-        }
+            await EndSessionAsync($"应用设置：{reason}", ConnectionPhase.Connecting);
+            ct.ThrowIfCancellationRequested();
+            if (device is null)
+                FailConnection("当前投屏设备已离线，请重新连接。");
+            else
+                await StartMirrorAsync(device, ct);
+        });
     }
 
     public void SaveQuality(string key)
@@ -1918,6 +1786,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
         try
         {
+            _connectionCts?.Cancel();
+            _stoppingSession?.ForceStop();
             _session?.Dispose();
             _session = null;
         }
@@ -1951,7 +1821,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// </summary>
     public void ForceStopSession()
     {
-        try { _session?.ForceStop(); }
+        try { (_session ?? _stoppingSession)?.ForceStop(); }
         catch { /* 忽略 */ }
     }
 
