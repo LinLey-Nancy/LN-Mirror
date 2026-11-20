@@ -34,6 +34,11 @@ internal sealed record WirelessTarget(string? Address, string? InstanceName)
     public string? ResolveAddress(IReadOnlyList<MdnsServiceInfo> services)
     {
         if (InstanceName is null) return Address;
+        if (Address is not null && string.Equals(
+                WirelessDebuggingDiscovery.FindByAddress(services, Address)?.InstanceName,
+                InstanceName, StringComparison.OrdinalIgnoreCase))
+            return Address;
+
         var service = WirelessDebuggingDiscovery.FindByInstance(services, InstanceName);
         return service is not null && WirelessDebuggingDiscovery.FindByAddress(services, service.Address) is not null
             ? service.Address
@@ -44,6 +49,26 @@ internal sealed record WirelessTarget(string? Address, string? InstanceName)
         => (InstanceName is not null && string.Equals(InstanceName, AdbDevice.GetMdnsInstanceName(device.Serial),
                 StringComparison.OrdinalIgnoreCase))
             || (resolvedAddress is not null && string.Equals(resolvedAddress, device.Serial, StringComparison.OrdinalIgnoreCase));
+
+    public AdbDevice? FindDevice(IReadOnlyList<AdbDevice> devices, string? address, bool preferAddress)
+    {
+        AdbDevice? alternate = null;
+        AdbDevice? unready = null;
+        foreach (var device in devices)
+        {
+            if (!Matches(device, address)) continue;
+            if (!device.IsReady)
+            {
+                unready = device;
+                continue;
+            }
+
+            bool matchesAddress = string.Equals(device.Serial, address, StringComparison.OrdinalIgnoreCase);
+            if (matchesAddress == preferAddress) return device;
+            alternate ??= device;
+        }
+        return alternate ?? unready;
+    }
 }
 
 internal static class WirelessDebuggingDiscovery

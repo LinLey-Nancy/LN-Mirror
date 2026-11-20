@@ -617,7 +617,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private void ApplyDeviceRows(IReadOnlyList<AdbDevice> devices, IReadOnlyList<MdnsServiceInfo> services)
     {
         var previous = SelectedDevice;
-        var display = devices.Where(d => !IsDuplicateMdnsSerial(d, devices, services)).ToList();
+        var display = devices.Where(d => !HasPreferredWirelessAlias(d, devices, services)).ToList();
         if (!Devices.SequenceEqual(display))
         {
             Devices.Clear();
@@ -625,19 +625,28 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         }
 
         var preferred = previous?.Serial ?? _settings.PreferredSerial;
-        SelectedDevice = Devices.FirstOrDefault(d => d.Serial == preferred)
+        var selected = Devices.FirstOrDefault(d => d.Serial == preferred);
+        if (selected is null && preferred is not null && AdbDevice.IsWirelessSerial(preferred))
+        {
+            var target = WirelessTarget.FromSerial(preferred, services);
+            selected = target.FindDevice(Devices, target.ResolveAddress(services), preferAddress: false);
+        }
+        SelectedDevice = selected
             ?? Devices.FirstOrDefault(d => d.IsReady)
             ?? Devices.FirstOrDefault();
         if (!IsConnected) RefreshPhaseFromDevice();
     }
 
-    private static bool IsDuplicateMdnsSerial(AdbDevice device, IReadOnlyList<AdbDevice> devices,
+    private static bool HasPreferredWirelessAlias(AdbDevice device, IReadOnlyList<AdbDevice> devices,
         IReadOnlyList<MdnsServiceInfo> services)
     {
-        if (AdbDevice.GetMdnsInstanceName(device.Serial) is not { } instance) return false;
-        var address = new WirelessTarget(null, instance).ResolveAddress(services);
-        return address is not null && devices.Any(d => d.IsReady
-            && string.Equals(d.Serial, address, StringComparison.OrdinalIgnoreCase));
+        if (!AdbDevice.IsWirelessSerial(device.Serial)) return false;
+        var target = WirelessTarget.FromSerial(device.Serial, services);
+        if (target.InstanceName is null) return false;
+
+        var address = target.ResolveAddress(services);
+        var preferred = target.FindDevice(devices, address, preferAddress: false);
+        return preferred?.IsReady == true && preferred.Serial != device.Serial;
     }
 
     private void OnDeviceChanged(AdbDevice device, AdbDevice? previous)
@@ -861,14 +870,16 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             return Task.CompletedTask;
         }
 
-        return RunConnectionAsync(ct => ConnectLanCoreAsync(adb, WirelessTarget.FromSerial(address, MdnsServices), ct));
+        return RunConnectionAsync(ct => ConnectLanCoreAsync(adb, new(address, null), ct));
     }
 
     private async Task ConnectLanCoreAsync(AdbClient adb, WirelessTarget target, CancellationToken ct)
     {
         var address = NormalizeLanAddress(target.ResolveAddress(MdnsServices));
-        var ready = DeviceSnapshot.FirstOrDefault(d => d.IsReady && target.Matches(d, address));
-        if (ready is not null)
+        var preferAddress = target.InstanceName is null;
+        var matchTarget = preferAddress && address is not null ? WirelessTarget.FromSerial(address, MdnsServices) : target;
+        var ready = matchTarget.FindDevice(DeviceSnapshot, address, preferAddress);
+        if (ready?.IsReady == true)
         {
             SelectedDevice = ready;
             await StartMirrorAsync(ready, ct, target);
@@ -885,14 +896,14 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         var result = await adb.ConnectAsync(address, ct);
         if (!AdbClient.IsConnectSuccess(result))
         {
-            FailConnection(AdbClient.DescribeConnectFailure(result, target.InstanceName is not null));
+            FailConnection(AdbClient.DescribeConnectFailure(result, matchTarget.InstanceName is not null));
             return;
         }
 
-        var device = await WaitForDeviceAsync(address, TimeSpan.FromSeconds(10), ct, target);
+        var device = await WaitForDeviceAsync(address, TimeSpan.FromSeconds(10), ct, matchTarget, preferAddress);
         if (device?.IsReady != true)
         {
-            FailConnection(target.InstanceName is not null
+            FailConnection(matchTarget.InstanceName is not null
                 ? $"无线调试设备未就绪。若这台电脑尚未配对，{AdbClient.WirelessPairingHint}"
                 : device?.StateDescription ?? "设备已响应但未出现在设备列表里，请在手机上确认无线调试仍开启。");
             return;
@@ -903,7 +914,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>等待串号就绪，超时后返回最后一次看到的状态。</summary>
-    private async Task<AdbDevice?> WaitForDeviceAsync(string serial, TimeSpan timeout, CancellationToken ct, WirelessTarget? wireless = null)
+    private async Task<AdbDevice?> WaitForDeviceAsync(string serial, TimeSpan timeout, CancellationToken ct,
+        WirelessTarget? wireless = null, bool preferAddress = false)
     {
         if (_adb is null) return null;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -918,14 +930,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                     var devices = _monitor is { } monitor
                         ? await monitor.RefreshAsync(deadline.Token)
                         : await _adb.GetDevicesAsync(deadline.Token);
-                    foreach (var device in devices)
-                    {
-                        var matches = wireless?.Matches(device, serial)
-                            ?? string.Equals(device.Serial, serial, StringComparison.OrdinalIgnoreCase);
-                        if (!matches) continue;
-                        if (device.IsReady) return device;
-                        lastSeen = device;
-                    }
+                    var device = wireless is null
+                        ? devices.FirstOrDefault(d => string.Equals(d.Serial, serial, StringComparison.OrdinalIgnoreCase))
+                        : wireless.FindDevice(devices, serial, preferAddress);
+                    if (device?.IsReady == true) return device;
+                    lastSeen = device ?? lastSeen;
                 }
                 catch (IOException ex)
                 {
@@ -1012,7 +1021,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         return _settings.LanDevices.Where(entry => instance is null
                 ? string.Equals(entry.LastAddress, serial, StringComparison.OrdinalIgnoreCase)
                 : string.Equals(entry.MdnsName, instance, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(entry => entry.LastConnectedAt)
+            .OrderByDescending(entry => !string.IsNullOrWhiteSpace(entry.MdnsName))
+            .ThenByDescending(entry => entry.LastConnectedAt)
             .FirstOrDefault();
     }
 
@@ -1026,9 +1036,17 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             string.IsNullOrEmpty(d.MdnsName) && string.Equals(d.LastAddress, target.Address, StringComparison.OrdinalIgnoreCase));
     }
 
-    private void UpdateLanHistory(AdbDevice device, WirelessTarget target)
+    private WirelessTarget UpdateLanHistory(AdbDevice device, WirelessTarget? target)
     {
+        if (target?.InstanceName is null)
+            target = WirelessTarget.FromSerial(device.Serial, MdnsServices);
+
         var address = target.ResolveAddress(MdnsServices);
+        // 只有已确认的身份才可以取代同一地址的已知设备。
+        if (target.InstanceName is null && _settings.LanDevices.Any(entry => !string.IsNullOrWhiteSpace(entry.MdnsName)
+                && string.Equals(entry.LastAddress, address, StringComparison.OrdinalIgnoreCase)))
+            return target;
+
         var entry = FindLanHistory(target);
         if (entry is null && address is not null)
         {
@@ -1048,6 +1066,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         var index = LanHistory.IndexOf(entry);
         if (index >= 0) LanHistory.RemoveAt(index);
         LanHistory.Insert(0, entry);
+        _settings.PreferredSerial = target.InstanceName is { } instance
+            ? instance + AdbDevice.MdnsSerialSuffix
+            : device.Serial;
+        return target;
     }
 
     private bool CancelReconnect()
@@ -1227,13 +1249,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
             if (_hoverRevealEnabled) _hoverWatcher.Start();
             if (options.IsWireless)
-            {
-                target ??= WirelessTarget.FromSerial(device.Serial, MdnsServices);
-                UpdateLanHistory(device, target);
-            }
-            _settings.PreferredSerial = target?.InstanceName is { } instance
-                ? instance + AdbDevice.MdnsSerialSuffix
-                : device.Serial;
+                target = UpdateLanHistory(device, target);
+            else
+                _settings.PreferredSerial = device.Serial;
             SaveSettings();
 
             _connectedDevice = device;

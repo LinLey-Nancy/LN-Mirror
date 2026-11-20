@@ -112,18 +112,45 @@ var cases = new (string Name, Action Check)[]
     ("连接发现设备优先复用已就绪的 mDNS 串号", () =>
     {
         using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
-        var adb = new AdbClient(Environment.ProcessPath!);
-        var monitor = new DeviceMonitor(adb);
-        var mdns = new MdnsMonitor(adb);
-        typeof(DeviceMonitor).GetProperty(nameof(DeviceMonitor.Current))!.SetValue(monitor,
-            AdbClient.ParseDevices("adb-phone-TnSdi9._adb-tls-connect._tcp. device"));
-        var services = MdnsServicesParser.Parse(connectAdvertisement);
-        typeof(MdnsMonitor).GetProperty(nameof(MdnsMonitor.Current))!.SetValue(mdns, services);
-        SetControllerField(controller, "_adb", adb);
-        SetControllerField(controller, "_monitor", monitor);
-        SetControllerField(controller, "_mdns", mdns);
+        const string mdnsSerial = "adb-phone-TnSdi9._adb-tls-connect._tcp.";
+        var services = SetWirelessSnapshots(controller, $"{connectAddress} device\n{mdnsSerial} device", connectAdvertisement);
         controller.ConnectDiscoveredLanAsync(services.Single()).GetAwaiter().GetResult();
-        Require(controller.Notice.Contains("内置 scrcpy 引擎不可用"));
+        Require(controller.Notice.Contains("内置 scrcpy 引擎不可用") && controller.SelectedDevice?.Serial == mdnsSerial);
+    }),
+    ("同一个 mDNS 实例有多个端点时仍使用手填的就绪地址", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        SetWirelessSnapshots(controller, $"{connectAddress} device", connectAdvertisement,
+            connectAdvertisement.Replace(connectAddress, "192.0.2.12:33015"));
+        controller.ConnectLanAsync(connectAddress).GetAwaiter().GetResult();
+        Require(controller.SelectedDevice?.Serial == connectAddress && controller.Notice.Contains("内置 scrcpy 引擎不可用"));
+    }),
+    ("旧 IP 首选可选中已经合并成 mDNS 行的同一台设备", () =>
+    {
+        const string serial = "adb-phone-TnSdi9._adb-tls-connect._tcp";
+        using var controller = new AppController(new AppSettings { PreferredSerial = connectAddress }, Dispatcher.CurrentDispatcher);
+        var output = $"other-usb device\n{connectAddress} device\n{serial} device";
+        SetWirelessSnapshots(controller, output, connectAdvertisement);
+        var apply = typeof(AppController).GetMethod("OnDevicesSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        apply.Invoke(controller, [AdbClient.ParseDevices(output)]);
+        Require(controller.Devices.Count == 2 && controller.SelectedDevice?.Serial == serial);
+    }),
+    ("旧 IP 历史成功后补记当前确认的 mDNS 身份", () =>
+    {
+        var legacy = new LanDeviceEntry { LastAddress = connectAddress };
+        var settings = new AppSettings { LanDevices = [legacy] };
+        using var controller = new AppController(settings, Dispatcher.CurrentDispatcher);
+        SetWirelessSnapshots(controller, $"{connectAddress} device", connectAdvertisement);
+        RecordWirelessHistory(controller, connectAddress);
+        Require(settings.LanDevices.Count == 1 && legacy.MdnsName == "adb-phone-TnSdi9");
+    }),
+    ("无法核对同地址的设备身份时保留已有命名历史", () =>
+    {
+        var known = new LanDeviceEntry { LastAddress = connectAddress, MdnsName = "adb-phone-TnSdi9" };
+        var settings = new AppSettings { PreferredSerial = "adb-phone-TnSdi9._adb-tls-connect._tcp", LanDevices = [known] };
+        using var controller = new AppController(settings, Dispatcher.CurrentDispatcher);
+        RecordWirelessHistory(controller, connectAddress);
+        Require(settings.LanDevices.Count == 1 && settings.LanDevices[0] == known);
     }),
     ("已知 mDNS 身份的历史设备不会直连未验证的旧端口", () =>
     {
@@ -207,7 +234,7 @@ var cases = new (string Name, Action Check)[]
         try
         {
             var started = Environment.TickCount64;
-            var task = (Task<AdbDevice?>)wait.Invoke(controller, [connectAddress, duration, CancellationToken.None, null])!;
+            var task = (Task<AdbDevice?>)wait.Invoke(controller, [connectAddress, duration, CancellationToken.None, null, false])!;
             Require(task.GetAwaiter().GetResult()?.IsOffline == true);
             Require(Environment.TickCount64 - started >= 750);
         }
@@ -472,6 +499,28 @@ static void SampleHover(MirrorHoverWatcher watcher, int x, long now)
     var sample = typeof(MirrorHoverWatcher).GetMethod("ObservePointer", BindingFlags.Instance | BindingFlags.NonPublic);
     Require(sample is not null);
     sample!.Invoke(watcher, [new WindowRect(0, 0, 100, 100), x, 50, now]);
+}
+
+static IReadOnlyList<MdnsServiceInfo> SetWirelessSnapshots(AppController controller, string devices, params string[] advertisements)
+{
+    var adb = new AdbClient(Environment.ProcessPath!);
+    var monitor = new DeviceMonitor(adb);
+    var mdns = new MdnsMonitor(adb);
+    var services = MdnsServicesParser.Parse(string.Join('\n', advertisements));
+    typeof(DeviceMonitor).GetProperty(nameof(DeviceMonitor.Current))!.SetValue(monitor, AdbClient.ParseDevices(devices));
+    typeof(MdnsMonitor).GetProperty(nameof(MdnsMonitor.Current))!.SetValue(mdns, services);
+    SetControllerField(controller, "_adb", adb);
+    SetControllerField(controller, "_monitor", monitor);
+    SetControllerField(controller, "_mdns", mdns);
+    return services;
+}
+
+static void RecordWirelessHistory(AppController controller, string address)
+{
+    var targetType = typeof(MdnsMonitor).Assembly.GetType("LNMirror.Core.Adb.WirelessTarget")!;
+    var target = Activator.CreateInstance(targetType, [address, null]);
+    var update = typeof(AppController).GetMethod("UpdateLanHistory", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    update.Invoke(controller, [new AdbDevice(address, "device", "Test", "", "", "1"), target]);
 }
 
 static void SetHoverDelay(MirrorHoverWatcher watcher, int milliseconds, bool requireStillness)
