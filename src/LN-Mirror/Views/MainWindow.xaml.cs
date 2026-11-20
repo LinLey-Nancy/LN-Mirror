@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Media;
 using LNMirror.Core;
 using LNMirror.Core.Adb;
 using LNMirror.Core.Configuration;
@@ -15,6 +14,8 @@ public partial class MainWindow : Window
     private readonly AppController _controller;
     private readonly TrayIconService _tray;
     private bool _exitRequested;
+    private bool _pairingInProgress;
+    private IInputElement? _pairingReturnFocus;
     private int _logUpdatePending;
 
     public MainWindow(AppController controller, TrayIconService tray)
@@ -23,6 +24,7 @@ public partial class MainWindow : Window
         _tray = tray;
         InitializeComponent();
         DataContext = controller;
+        ApplyPhaseVisual();
 
         AppLog.EntryAdded += OnLogEntry;
         controller.PropertyChanged += OnControllerPropertyChanged;
@@ -32,19 +34,46 @@ public partial class MainWindow : Window
 
     public void ApplyPhaseVisual()
     {
-        var (background, border, foreground) = _controller.Phase switch
+        var (label, brush) = _controller.Phase switch
         {
-            Core.ConnectionPhase.Connected => ("#FFEAF4EA", "#FFBBD9BB", "#FF24562A"),
-            Core.ConnectionPhase.Connecting => ("#FFF3F0E4", "#FFE0D3A8", "#FF6B5310"),
-            Core.ConnectionPhase.Unauthorized => ("#FFF3F0E4", "#FFE0D3A8", "#FF6B5310"),
-            Core.ConnectionPhase.Offline => ("#FFF6ECE9", "#FFE6C4BB", "#FF8A3524"),
-            Core.ConnectionPhase.Failed => ("#FFF6ECE9", "#FFE6C4BB", "#FF8A3524"),
-            _ => ("#FFF0F0EE", "#FFE2E2E0", "#FF232323"),
+            ConnectionPhase.Connected => ("投屏中", "OkBrush"),
+            ConnectionPhase.Connecting => ("正在连接", "CenterMuted"),
+            ConnectionPhase.Unauthorized => ("等待授权", "WarnBrush"),
+            ConnectionPhase.Offline => ("设备离线", "ErrBrush"),
+            ConnectionPhase.Failed => ("连接失败", "ErrBrush"),
+            _ when _controller.IsBusy => ("正在连接", "CenterMuted"),
+            _ when _controller.SelectedDevice?.IsReady == true => ("可连接", "CenterMuted"),
+            _ => ("未连接", "CenterMuted"),
         };
 
-        PhaseStrip.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(background));
-        PhaseStrip.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(border));
-        PhaseText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(foreground));
+        PhaseText.Text = label;
+        PhaseText.Foreground = PhaseDot.Fill = (System.Windows.Media.Brush)FindResource(brush);
+        ConnectButton.Visibility = _controller.CanDisconnect ? Visibility.Collapsed : Visibility.Visible;
+        DisconnectButton.Visibility = _controller.CanDisconnect ? Visibility.Visible : Visibility.Collapsed;
+        DisconnectButton.Content = _controller.IsConnected ? "结束投屏" : "取消连接";
+
+        EmptyDeviceHint.Text = _controller.IsLanMode
+            ? "未发现无线设备。请开启手机的无线调试，或添加设备。"
+            : "暂无 USB 设备。请连接数据线，并在手机上允许 USB 调试。";
+        ConnectionDetail.Text = _controller.Phase switch
+        {
+            ConnectionPhase.Unauthorized => "请解锁手机，在弹窗中允许这台电脑。",
+            ConnectionPhase.Offline => _controller.SelectedDeviceStateText,
+            ConnectionPhase.Failed => _controller.StatusLine,
+            ConnectionPhase.Connected => _controller.SelectedDeviceText,
+            _ => string.Empty,
+        };
+        ConnectionDetail.Visibility = string.IsNullOrWhiteSpace(ConnectionDetail.Text)
+            ? Visibility.Collapsed : Visibility.Visible;
+
+        var opacity = _controller.IsConnected ? _controller.EffectiveOpacity : _controller.Opacity;
+        PreviewPhone.Opacity = opacity / 100d;
+        PreviewOutline.Visibility = opacity == 0 && _controller.HoverRevealHint == HoverRevealHints.Outline
+            ? Visibility.Visible : Visibility.Collapsed;
+        PreviewCorner.Visibility = opacity == 0 && _controller.HoverRevealHint == HoverRevealHints.CornerMark
+            ? Visibility.Visible : Visibility.Collapsed;
+        PreviewState.Text = _controller.IsConnected
+            ? _controller.OpacityStateText : "连接后可调节画面";
     }
 
     private async void OnConnectClick(object sender, RoutedEventArgs e)
@@ -64,6 +93,48 @@ public partial class MainWindow : Window
     private async void OnRefreshLanClick(object sender, RoutedEventArgs e)
         => await _controller.RefreshLanDiscoveryAsync();
 
+    private void OnAddDeviceClick(object sender, RoutedEventArgs e) => OpenPairing();
+
+    private void OpenPairing(string? address = null)
+    {
+        if (_controller.IsBusy || _controller.IsConnected)
+        {
+            _controller.Notice = _controller.IsConnected
+                ? "请先结束当前投屏，再添加设备。" : "正在处理连接，请稍候。";
+            return;
+        }
+
+        _pairingReturnFocus = Keyboard.FocusedElement;
+        PairAddressBox.Text = address ?? string.Empty;
+        PairCodeBox.Clear();
+        PairingMessage.Visibility = Visibility.Collapsed;
+        PairingOverlay.Visibility = Visibility.Visible;
+        Navigation.IsEnabled = false;
+        if (address is null) PairAddressBox.Focus();
+        else PairCodeBox.Focus();
+    }
+
+    private void ClosePairing()
+    {
+        PairCodeBox.Clear();
+        PairAddressBox.Clear();
+        PairingMessage.Text = string.Empty;
+        PairingOverlay.Visibility = Visibility.Collapsed;
+        Navigation.IsEnabled = true;
+        if (_pairingReturnFocus is { } previous && Keyboard.Focus(previous) != previous)
+            AddDeviceButton.Focus();
+        _pairingReturnFocus = null;
+    }
+
+    private void OnClosePairingClick(object sender, RoutedEventArgs e) => ClosePairing();
+
+    private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (PairingOverlay.Visibility != Visibility.Visible || e.Key != Key.Escape) return;
+        if (!_pairingInProgress) ClosePairing();
+        e.Handled = true;
+    }
+
     private async void OnDiscoveredItemClick(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not MdnsServiceInfo service) return;
@@ -71,8 +142,7 @@ public partial class MainWindow : Window
         if (service.Kind == MdnsServiceKind.Pairing)
         {
             // 配对服务只提供地址，配对码仍需用户在手机配对对话框里查看后输入
-            PairAddressBox.Text = service.Address;
-            PairCodeBox.Focus();
+            OpenPairing(service.Address);
             return;
         }
 
@@ -83,10 +153,38 @@ public partial class MainWindow : Window
 
     private async void OnPairConnectClick(object sender, RoutedEventArgs e)
     {
-        await _controller.PairAndConnectAsync(PairAddressBox.Text, PairCodeBox.Text);
-        PairCodeBox.Text = string.Empty;
+        if (_pairingInProgress) return;
+
+        _pairingInProgress = true;
+        PairFields.IsEnabled = PairSubmitButton.IsEnabled = PairCloseButton.IsEnabled = CancelPairButton.IsEnabled = false;
+        PairingMessage.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "CenterMuted");
+        PairingMessage.Text = "正在配对并连接…";
+        PairingMessage.Visibility = Visibility.Visible;
+        try
+        {
+            await _controller.PairAndConnectAsync(PairAddressBox.Text, PairCodeBox.Text);
+        }
+        finally
+        {
+            PairCodeBox.Clear();
+            PairFields.IsEnabled = PairSubmitButton.IsEnabled = PairCloseButton.IsEnabled = CancelPairButton.IsEnabled = true;
+            _pairingInProgress = false;
+        }
+
         ApplyPhaseVisual();
-        if (_controller.IsConnected) _tray.ShowToolbar();
+        if (_controller.IsConnected)
+        {
+            ClosePairing();
+            _tray.ShowToolbar();
+        }
+        else
+        {
+            PairingMessage.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "ErrBrush");
+            PairingMessage.Text = string.IsNullOrWhiteSpace(_controller.Notice)
+                ? "配对未完成，请重新查看手机上的配对信息。" : _controller.Notice;
+            _controller.Notice = string.Empty;
+            PairCodeBox.Focus();
+        }
     }
 
     private async void OnManualLanConnectClick(object sender, RoutedEventArgs e)
@@ -121,12 +219,6 @@ public partial class MainWindow : Window
     {
         await _controller.RestoreAsync();
         _tray.ShowToolbar();
-    }
-
-    private void OnOpacityPresetClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not System.Windows.Controls.Button { Tag: string tag }) return;
-        if (int.TryParse(tag, out var value)) _controller.Opacity = value;
     }
 
     private async void OnVerifyPassThroughClick(object sender, RoutedEventArgs e)
@@ -255,8 +347,11 @@ public partial class MainWindow : Window
 
     private void OnControllerPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(AppController.Phase) or nameof(AppController.Opacity)
-            or nameof(AppController.PassThrough) or nameof(AppController.IsConnected))
+        if (e.PropertyName is nameof(AppController.Phase) or nameof(AppController.IsBusy)
+            or nameof(AppController.IsLanMode) or nameof(AppController.SelectedDevice)
+            or nameof(AppController.Opacity) or nameof(AppController.EffectiveOpacity)
+            or nameof(AppController.OpacityStateText) or nameof(AppController.HoverRevealHint)
+            or nameof(AppController.StatusLine))
         {
             Dispatcher.InvokeAsync(ApplyPhaseVisual);
         }
@@ -296,6 +391,7 @@ public partial class MainWindow : Window
         }
 
         e.Cancel = true;
+        if (PairingOverlay.Visibility == Visibility.Visible && !_pairingInProgress) ClosePairing();
         Hide();
         _tray.NotifyMinimizedToTray();
     }
