@@ -122,18 +122,11 @@ public sealed class ScrcpySession : IDisposable
             }
 
             // 优先关闭它自己的画面窗口，让 scrcpy 走正常的清理流程（移除手机端 server、恢复设备状态）
-            bool closed = false;
-            if (WindowHandle != IntPtr.Zero && NativeMethods.IsWindow(WindowHandle))
-            {
-                NativeMethods.PostMessageW(WindowHandle, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-                closed = process.WaitForExit((int)StopTimeout.TotalMilliseconds);
-            }
-
-            if (!closed)
-            {
-                process.CloseMainWindow();
-                closed = process.WaitForExit(2000);
-            }
+            var notified = WindowHandle != IntPtr.Zero && NativeMethods.IsWindow(WindowHandle)
+                && NativeMethods.PostMessageW(WindowHandle, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+            bool closed = notified
+                ? process.WaitForExit((int)StopTimeout.TotalMilliseconds)
+                : process.CloseMainWindow() && process.WaitForExit(2000);
 
             if (!closed)
             {

@@ -252,7 +252,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         set => SetHoverRevealEnabled(value);
     }
 
-    /// <summary>悬停显示模式下，鼠标此刻是否正落在画面范围内。</summary>
+    /// <summary>悬停显示模式下，画面是否已显示。</summary>
     public bool HoverRevealActive => _hoverRevealActive;
 
     public int HoverCustomDelayMs => _settings.HoverCustomDelayMs;
@@ -1562,20 +1562,20 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public async Task VerifyPassThroughAsync(bool showNotice = true)
     {
-        if (!IsConnected)
+        var session = _session;
+        if (!IsConnected || session is null)
         {
             PassThroughCheck = "尚未连接，无法验证";
             OnPropertyChanged(nameof(PassThroughCheck));
             return;
         }
 
-        IsBusy = true;
         await Task.Delay(20).ConfigureAwait(true);
+        if (!ReferenceEquals(_session, session)) return;
+
         var check = PassThroughVerifier.VerifyAndLog(_window);
         PassThroughCheck = $"{check.Display}（{check.Detail}）";
         OnPropertyChanged(nameof(PassThroughCheck));
-        IsBusy = false;
-
         if (showNotice) Notice = PassThroughCheck;
     }
 

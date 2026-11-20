@@ -98,6 +98,8 @@ public sealed class AdbClient
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeoutMs);
+        // 退出应用时也要先终止本次 ADB 客户端，无需等待线程池继续执行。
+        using var stopRegistration = timeoutCts.Token.Register(static state => TryKill((Process)state!), process);
         var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
         var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
 
@@ -107,7 +109,6 @@ public sealed class AdbClient
         }
         catch (OperationCanceledException)
         {
-            TryKill(process);
             await SafeReadAsync(stdoutTask).ConfigureAwait(false);
             await SafeReadAsync(stderrTask).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
@@ -307,7 +308,7 @@ public sealed class AdbClient
     {
         try
         {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            if (!process.HasExited) process.Kill();
         }
         catch
         {
