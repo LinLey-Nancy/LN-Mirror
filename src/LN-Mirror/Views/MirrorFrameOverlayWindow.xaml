@@ -12,12 +12,6 @@
         ShowActivated="False"
         Title="LN-Mirror 悬停边框">
 
-    <Window.Resources>
-        <Style TargetType="Border">
-            <Setter Property="Opacity" Value="0.35"/>
-        </Style>
-    </Window.Resources>
-
     <!--
       画面上方的覆盖层，三件事：
       1. 画面可见且鼠标移上去时，在四周显示拖动/缩放把手；
@@ -53,6 +47,12 @@
         <!-- 拖动/缩放把手 -->
         <Grid x:Name="HandleLayer" Grid.Row="0" Grid.Column="0" Grid.RowSpan="3" Grid.ColumnSpan="3"
               Visibility="Collapsed">
+            <Grid.Resources>
+                <Style TargetType="Border">
+                    <Setter Property="Opacity" Value="0.35"/>
+                    <Setter Property="ForceCursor" Value="True"/>
+                </Style>
+            </Grid.Resources>
             <Grid.RowDefinitions>
                 <RowDefinition Height="14"/>
                 <RowDefinition Height="*"/>
