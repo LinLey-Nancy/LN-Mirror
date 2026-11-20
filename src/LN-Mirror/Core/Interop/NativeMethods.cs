@@ -68,9 +68,6 @@ internal static class NativeMethods
     internal const int VK_RBUTTON = 0x02;
     internal const int VK_MBUTTON = 0x04;
 
-    /// <summary>系统箭头光标（IDC_ARROW）。</summary>
-    internal const int IDC_ARROW = 32512;
-
     [StructLayout(LayoutKind.Sequential)]
     internal struct POINT
     {
@@ -136,12 +133,6 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
-
-    [DllImport("user32.dll")]
-    internal static extern IntPtr SetCursor(IntPtr hCursor);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr hCursor);
 
     [DllImport("user32.dll")]
     internal static extern IntPtr WindowFromPoint(POINT point);

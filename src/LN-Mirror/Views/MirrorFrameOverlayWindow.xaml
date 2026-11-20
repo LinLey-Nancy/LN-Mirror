@@ -50,12 +50,6 @@
             <Rectangle Width="2" Height="20" Fill="#77909090" HorizontalAlignment="Left" VerticalAlignment="Top"/>
         </Grid>
 
-        <!-- 自绘定位点：系统箭头在画面上停稳后隐藏，用这个小点代替它 -->
-        <Canvas Grid.Row="0" Grid.Column="0" Grid.RowSpan="3" Grid.ColumnSpan="3" IsHitTestVisible="False">
-            <Ellipse x:Name="PointerDot" Width="9" Height="9" Stroke="#FFFFFFFF" StrokeThickness="1.5"
-                     Fill="#40000000" Visibility="Collapsed"/>
-        </Canvas>
-
         <!-- 拖动/缩放把手 -->
         <Grid x:Name="HandleLayer" Grid.Row="0" Grid.Column="0" Grid.RowSpan="3" Grid.ColumnSpan="3"
               Visibility="Collapsed">
