@@ -26,10 +26,68 @@ if (args is ["connect", connectAddress])
     return 0;
 }
 
+if (args is ["devices", "-l"])
+{
+    if (Environment.GetEnvironmentVariable("LN_MIRROR_TEST_ADB") == "offline")
+    {
+        Console.WriteLine($"List of devices attached\n{connectAddress} offline");
+        return 0;
+    }
+
+    Console.Error.WriteLine("test: adb server is unavailable");
+    return 1;
+}
+
+if (args is ["pending-command"])
+{
+    Thread.Sleep(5000);
+    return 0;
+}
+
 if (args.Length > 0) return 2;
+
+SettingsStore.ReadOnly = true;
 
 var cases = new (string Name, Action Check)[]
 {
+    ("设备查询失败保留最后一次成功快照", () =>
+    {
+        var monitor = new DeviceMonitor(new AdbClient(Environment.ProcessPath!));
+        var snapshot = AdbClient.ParseDevices($"{connectAddress} device");
+        typeof(DeviceMonitor).GetMethod("ApplySnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(monitor, [snapshot]);
+        var removed = false;
+        monitor.DeviceChanged += (device, _) => removed |= device.State == "removed";
+
+        using var cancel = new CancellationTokenSource();
+        monitor.StartAsync(cancel.Token).GetAwaiter().GetResult();
+        Require(!removed && ReferenceEquals(snapshot, monitor.Current));
+        monitor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }),
+    ("调用方取消 ADB 命令会收到取消异常", () =>
+    {
+        var adb = new AdbClient(Environment.ProcessPath!);
+        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        try { adb.RunAsync(["pending-command"], cancel.Token).GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { return; }
+        throw new InvalidOperationException("ADB 命令吞掉了调用方取消");
+    }),
+    ("就绪等待不会把第一个 offline 当成最终结果", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        SetControllerField(controller, "_adb", new AdbClient(Environment.ProcessPath!));
+        var wait = typeof(AppController).GetMethod("WaitForDeviceAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var duration = TimeSpan.FromMilliseconds(850);
+        Environment.SetEnvironmentVariable("LN_MIRROR_TEST_ADB", "offline");
+        try
+        {
+            var started = Environment.TickCount64;
+            var task = (Task<AdbDevice?>)wait.Invoke(controller, [connectAddress, duration])!;
+            Require(task.GetAwaiter().GetResult()?.IsOffline == true);
+            Require(Environment.TickCount64 - started >= 750);
+        }
+        finally { Environment.SetEnvironmentVariable("LN_MIRROR_TEST_ADB", null); }
+    }),
     ("无线低负载档将对应的参数传给 scrcpy", () =>
     {
         var options = new ScrcpyStartOptions { Serial = connectAddress, Quality = "WirelessLowLoad" };

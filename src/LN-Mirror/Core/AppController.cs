@@ -947,20 +947,34 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private async Task<AdbDevice?> WaitForDeviceAsync(string serial, TimeSpan timeout)
     {
         if (_adb is null) return null;
-        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
-
-        while (Environment.TickCount64 < deadline)
+        var lifetime = LifetimeToken;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
+        deadline.CancelAfter(timeout);
+        AdbDevice? lastSeen = null;
+        try
         {
-            LifetimeToken.ThrowIfCancellationRequested();
-
-            var devices = await _adb.GetDevicesAsync(LifetimeToken).ConfigureAwait(true);
-            var device = devices.FirstOrDefault(d => string.Equals(d.Serial, serial, StringComparison.OrdinalIgnoreCase));
-            if (device is not null) return device;
-
-            await Task.Delay(600, LifetimeToken).ConfigureAwait(true);
+            while (true)
+            {
+                try
+                {
+                    var devices = _monitor is { } monitor
+                        ? await monitor.RefreshAsync(deadline.Token).ConfigureAwait(true)
+                        : await _adb.GetDevicesAsync(deadline.Token).ConfigureAwait(true);
+                    var device = devices.FirstOrDefault(d => string.Equals(d.Serial, serial, StringComparison.OrdinalIgnoreCase));
+                    if (device?.IsReady == true) return device;
+                    lastSeen = device ?? lastSeen;
+                }
+                catch (IOException ex)
+                {
+                    AppLog.Debug($"[设备] 等待就绪时查询失败：{ex.Message}");
+                }
+                await Task.Delay(600, deadline.Token).ConfigureAwait(true);
+            }
         }
-
-        return null;
+        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
+        {
+            return lastSeen;
+        }
     }
 
     /// <summary>连接历史设备：先试最近地址，失败时按 mDNS 实例名重新解析地址再试一次。</summary>

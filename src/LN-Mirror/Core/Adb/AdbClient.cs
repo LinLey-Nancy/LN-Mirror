@@ -57,6 +57,7 @@ public sealed class AdbClient
 
     public async Task<AdbResult> RunAsync(IEnumerable<string> args, CancellationToken ct, int timeoutMs = 20000, bool log = true)
     {
+        ct.ThrowIfCancellationRequested();
         var psi = new ProcessStartInfo
         {
             FileName = _adbPath,
@@ -85,11 +86,10 @@ public sealed class AdbClient
             return new AdbResult(-1, string.Empty, ex.Message);
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeoutMs);
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+        var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
 
         try
         {
@@ -98,12 +98,18 @@ public sealed class AdbClient
         catch (OperationCanceledException)
         {
             TryKill(process);
+            await SafeReadAsync(stdoutTask).ConfigureAwait(false);
+            await SafeReadAsync(stderrTask).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
             if (log) AppLog.Warn($"[ADB] 命令超时（{timeoutMs / 1000} 秒）：{Describe(list)}");
-            return new AdbResult(-1, await SafeReadAsync(stdoutTask), "命令超时");
+            return new AdbResult(-1, string.Empty, "命令超时");
         }
 
         var stdout = await SafeReadAsync(stdoutTask);
         var stderr = await SafeReadAsync(stderrTask);
+        ct.ThrowIfCancellationRequested();
+        if (timeoutCts.IsCancellationRequested)
+            return new AdbResult(-1, string.Empty, "命令超时");
 
         if (log)
         {
@@ -124,6 +130,8 @@ public sealed class AdbClient
     public async Task<IReadOnlyList<AdbDevice>> GetDevicesAsync(CancellationToken ct)
     {
         var result = await RunAsync(["devices", "-l"], ct, timeoutMs: 15000, log: false).ConfigureAwait(false);
+        if (!result.Ok)
+            throw new IOException($"ADB 设备查询失败（{result.ExitCode}）：{FirstMeaningfulLine(result.StdErr) ?? "无错误详情"}");
         return ParseDevices(result.StdOut);
     }
 
