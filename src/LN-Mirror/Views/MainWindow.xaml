@@ -322,24 +322,16 @@
                                         <DockPanel Visibility="{Binding HoverRevealEnabled, Converter={StaticResource BoolToVis}}" Margin="0,5">
                                             <TextBlock Text="悬停显示延迟" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                             <Grid HorizontalAlignment="Right">
-                                                <ToggleButton x:Name="HoverDelayToggle" Width="142" MinHeight="30" Padding="8,3"
-                                                              AutomationProperties.Name="悬停显示延迟">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Text="{Binding HoverDelayLabel}"/>
-                                                        <TextBlock Text="▾" Margin="7,0,0,0"/>
-                                                    </StackPanel>
-                                                </ToggleButton>
+                                                <ToggleButton x:Name="HoverDelayToggle" Width="142" Style="{StaticResource CenterFieldToggle}"
+                                                              AutomationProperties.Name="悬停显示延迟" Content="{Binding HoverDelayLabel}"/>
                                                 <Popup x:Name="HoverDelayPopup" PlacementTarget="{Binding ElementName=HoverDelayToggle}"
-                                                       Placement="Bottom" StaysOpen="False"
+                                                       Placement="Bottom" StaysOpen="False" AllowsTransparency="True" VerticalOffset="4"
                                                        IsOpen="{Binding IsChecked, ElementName=HoverDelayToggle, Mode=TwoWay}"
                                                        Opened="OnHoverDelayPopupOpened" Closed="OnHoverDelayPopupClosed">
-                                                    <Border MinWidth="142" Padding="4" Background="{StaticResource CenterSurface}"
-                                                            BorderBrush="{StaticResource CenterControlLine}" BorderThickness="1">
+                                                    <Border MinWidth="142" Style="{StaticResource CenterFieldMenu}">
                                                         <StackPanel PreviewKeyDown="OnHoverDelayPopupKeyDown" KeyboardNavigation.TabNavigation="Cycle">
                                                             <StackPanel.Resources>
-                                                                <Style TargetType="Button" BasedOn="{StaticResource CenterAction}">
-                                                                    <Setter Property="HorizontalContentAlignment" Value="Left"/>
-                                                                </Style>
+                                                                <Style TargetType="Button" BasedOn="{StaticResource CenterFieldMenuButton}"/>
                                                             </StackPanel.Resources>
                                                             <Button x:Name="HoverDelayOff" Content="关闭" Tag="{x:Static config:HoverDelayModes.Off}"
                                                                     Click="OnHoverDelayPresetClick" ToolTip="鼠标移入时立即显示"/>
@@ -353,7 +345,8 @@
                                                                     <ColumnDefinition Width="*"/>
                                                                     <ColumnDefinition Width="Auto"/>
                                                                 </Grid.ColumnDefinitions>
-                                                                <TextBox x:Name="HoverDelayInput" AutomationProperties.Name="自定义悬停延迟（秒）"
+                                                                <TextBox x:Name="HoverDelayInput" Style="{StaticResource CenterFieldText}"
+                                                                         AutomationProperties.Name="自定义悬停延迟（秒）"
                                                                          ToolTip="0.1–60 秒，可输入小数。按回车或点击菜单外保存。"/>
                                                                 <TextBlock Text="秒" Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center"/>
                                                             </Grid>
@@ -366,9 +359,9 @@
                                         </DockPanel>
                                         <DockPanel Visibility="{Binding HoverRevealEnabled, Converter={StaticResource BoolToVis}}" Margin="0,5">
                                             <TextBlock Text="隐藏时的位置提示" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <ComboBox ItemsSource="{Binding HoverRevealHintOptions}" DisplayMemberPath="DisplayName"
+                                            <ComboBox Style="{StaticResource CenterFieldCombo}" ItemsSource="{Binding HoverRevealHintOptions}" DisplayMemberPath="DisplayName"
                                                       AutomationProperties.Name="隐藏时的位置提示" SelectedValuePath="Key"
-                                                      SelectedValue="{Binding HoverRevealHint}" HorizontalAlignment="Right" Width="94"/>
+                                                      SelectedValue="{Binding HoverRevealHint}" HorizontalAlignment="Right" Width="142"/>
                                         </DockPanel>
                                         <CheckBox Content="悬停显示拖动把手" IsChecked="{Binding HoverFrameEnabled}" Style="{StaticResource CenterSettingCheck}"/>
                                     </StackPanel>
@@ -393,7 +386,8 @@
                             <StackPanel>
                                 <TextBlock Text="连接与画质" Style="{StaticResource CenterSectionTitle}" Margin="0,0,0,10"/>
                                 <DockPanel>
-                                    <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding QualityProfiles}" DisplayMemberPath="DisplayName"
+                                    <ComboBox DockPanel.Dock="Right" Style="{StaticResource CenterFieldCombo}"
+                                              ItemsSource="{Binding QualityProfiles}" DisplayMemberPath="DisplayName"
                                               SelectedValuePath="Key" SelectedValue="{Binding Quality}" AutomationProperties.Name="质量档位"
                                               Width="166" VerticalAlignment="Center" Margin="8,0,0,0"/>
                                     <StackPanel>
@@ -402,7 +396,7 @@
                                     </StackPanel>
                                 </DockPanel>
                                 <DockPanel Margin="0,10,0,0" ToolTip="0 ms 优先响应。增加缓冲可减少短时抖动，画面反馈也会稍晚。重连后生效。">
-                                    <ComboBox DockPanel.Dock="Right" Width="166" Margin="8,0,0,0"
+                                    <ComboBox DockPanel.Dock="Right" Width="166" Margin="8,0,0,0" Style="{StaticResource CenterFieldCombo}"
                                               ItemsSource="{Binding WirelessBufferDurations}" SelectedItem="{Binding WirelessVideoBufferMs}"
                                               AutomationProperties.Name="无线画面缓冲（毫秒）"/>
                                     <TextBlock Text="无线画面缓冲（ms）" VerticalAlignment="Center"/>
@@ -422,18 +416,19 @@
                                     <TextBlock Text="选中输入框后按下组合键。" Style="{StaticResource CenterNote}" Margin="0,0,0,6"/>
                                     <DockPanel Margin="0,0,0,8">
                                         <TextBlock Text="找回画面" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                        <TextBox x:Name="RestoreKeyBox" Width="166" MinHeight="32" HorizontalAlignment="Right"
+                                        <TextBox x:Name="RestoreKeyBox" Width="166" Style="{StaticResource CenterFieldText}" HorizontalAlignment="Right"
                                                  AutomationProperties.Name="找回画面的快捷键"
                                                  Text="{Binding HotkeyRestore, UpdateSourceTrigger=LostFocus}" Tag="restore" KeyDown="OnHotKeyBoxKeyDown"/>
                                     </DockPanel>
                                     <DockPanel Margin="0,0,0,8">
                                         <TextBlock Text="切换鼠标穿透" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                        <TextBox Width="166" MinHeight="32" HorizontalAlignment="Right" AutomationProperties.Name="切换鼠标穿透的快捷键"
+                                        <TextBox Width="166" Style="{StaticResource CenterFieldText}" HorizontalAlignment="Right"
+                                                 AutomationProperties.Name="切换鼠标穿透的快捷键"
                                                  Text="{Binding HotkeyPassThrough, UpdateSourceTrigger=LostFocus}" Tag="passthrough" KeyDown="OnHotKeyBoxKeyDown"/>
                                     </DockPanel>
                                     <DockPanel>
                                         <TextBlock Text="渲染后端" VerticalAlignment="Center" ToolTip="透明度不生效时可尝试 software 或 opengl"/>
-                                        <ComboBox ItemsSource="{Binding RenderDriverOptions}" SelectedItem="{Binding RenderDriver}"
+                                        <ComboBox Style="{StaticResource CenterFieldCombo}" ItemsSource="{Binding RenderDriverOptions}" SelectedItem="{Binding RenderDriver}"
                                                   AutomationProperties.Name="渲染后端" HorizontalAlignment="Right" Width="166"/>
                                     </DockPanel>
                                 </StackPanel>
