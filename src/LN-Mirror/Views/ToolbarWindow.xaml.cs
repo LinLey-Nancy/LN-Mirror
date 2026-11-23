@@ -77,9 +77,10 @@ public partial class ToolbarWindow : Window
 
     private void Tick()
     {
-        ConnectionTagText.Text = _controller.IsConnected
-            ? $"已连接 · {_controller.OpacityStateText}"
+        string connectionText = _controller.IsConnected
+            ? $"已连接 · {_controller.Opacity}%"
             : "未连接";
+        if (ConnectionTagText.Text != connectionText) ConnectionTagText.Text = connectionText;
 
         ApplyTopmostState();
         UpdateDragHints();

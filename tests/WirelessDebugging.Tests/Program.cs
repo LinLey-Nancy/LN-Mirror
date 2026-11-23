@@ -1,5 +1,7 @@
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
+using System.Windows.Controls;
 using System.Windows.Threading;
 using LNMirror.Core;
 using LNMirror.Core.Adb;
@@ -7,6 +9,7 @@ using LNMirror.Core.Configuration;
 using LNMirror.Core.Devices;
 using LNMirror.Core.Scrcpy;
 using LNMirror.Core.Windowing;
+using LNMirror.Views;
 
 const string connectAdvertisement = "adb-phone-TnSdi9 _adb-tls-connect._tcp 192.0.2.10:33015";
 const string pairAdvertisement = "adb-phone-QXjCrW _adb-tls-pairing._tcp 192.0.2.10:33861";
@@ -101,6 +104,35 @@ var cases = new (string Name, Action Check)[]
         controller.SetHoverDelay(HoverDelayModes.Custom, 1250);
         Require(controller.HoverCustomDelayMs == 1250 && controller.HoverDelayLabel.StartsWith("自定义"));
     }),
+    ("工具条连接标签不随悬停显隐刷新", () => RunSta(() =>
+    {
+        var app = new LNMirror.App();
+        app.InitializeComponent();
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        SetControllerField(controller, "_phase", ConnectionPhase.Connected);
+        SetControllerField(controller, "_hoverRevealEnabled", true);
+        SetControllerField(controller, "_opacity", 50);
+        var toolbar = new ToolbarWindow(controller, null!);
+        try
+        {
+            var tick = typeof(ToolbarWindow).GetMethod("Tick", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var text = (TextBlock)toolbar.FindName("ConnectionTagText");
+
+            SetControllerField(controller, "_hoverRevealActive", false);
+            SetControllerField(controller, "_effectiveOpacity", 0);
+            tick.Invoke(toolbar, null);
+            Require(text.Text == "已连接 · 50%");
+
+            SetControllerField(controller, "_hoverRevealActive", true);
+            SetControllerField(controller, "_effectiveOpacity", 50);
+            tick.Invoke(toolbar, null);
+            Require(text.Text == "已连接 · 50%");
+        }
+        finally
+        {
+            toolbar.Close();
+        }
+    })),
     ("同型号的不同设备不会被去重", () =>
     {
         using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
@@ -498,6 +530,26 @@ static void ApplySnapshot(AppController controller, params string[] advertisemen
     var services = MdnsServicesParser.Parse(string.Join('\n', advertisements));
     var applySnapshot = typeof(AppController).GetMethod("OnMdnsSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
     applySnapshot.Invoke(controller, [services]);
+}
+
+static void RunSta(Action check)
+{
+    Exception? failure = null;
+    var thread = new Thread(() =>
+    {
+        try
+        {
+            check();
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start();
+    thread.Join();
+    if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
 }
 
 static void Require(bool condition)
