@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LNMirror.Core.Diagnostics;
+using LNMirror.Core.Windowing;
 
 namespace LNMirror.Core.Configuration;
 
@@ -78,10 +79,20 @@ public static class HoverDelayModes
     };
 }
 
+public sealed class AppWindowSettings
+{
+    public int Opacity { get; set; } = 100;
+    public bool Topmost { get; set; }
+    public bool TaskSwitcherHidden { get; set; }
+    public string DisplayMode { get; set; } = AppWindowDisplayModes.Original;
+    public string ImagePath { get; set; } = string.Empty;
+    public string ImageStretch { get; set; } = "Uniform";
+}
+
 /// <summary>本地配置。只保存显示偏好与非敏感的局域网连接信息，不保存配对码等授权凭据。</summary>
 public sealed class AppSettings
 {
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 3;
 
     /// <summary>上次使用的非零不透明度。启动与重连时用它恢复显示，避免画面静默不可见。</summary>
     public int Opacity { get; set; } = 100;
@@ -142,6 +153,8 @@ public sealed class AppSettings
     public bool LanAutoReconnect { get; set; } = true;
 
     public List<LanDeviceEntry> LanDevices { get; set; } = [];
+
+    public AppWindowSettings AppWindow { get; set; } = new();
 }
 
 public static class QualityNames
@@ -221,7 +234,7 @@ public static class SettingsStore
 
     private static AppSettings Normalize(AppSettings settings)
     {
-        settings.Version = 2;
+        settings.Version = 3;
         settings.WirelessVideoBufferMs = settings.ResolvedWirelessVideoBufferMs;
         settings.WirelessSmoothPlayback = false;
         settings.Opacity = Math.Clamp(settings.Opacity is >= 1 and <= 100 ? settings.Opacity : 100, 0, 100);
@@ -243,6 +256,12 @@ public static class SettingsStore
 
         settings.LanDevices ??= [];
         settings.LanDevices.RemoveAll(d => string.IsNullOrWhiteSpace(d.LastAddress) && string.IsNullOrWhiteSpace(d.MdnsName));
+        settings.AppWindow ??= new AppWindowSettings();
+        settings.AppWindow.Opacity = Math.Clamp(settings.AppWindow.Opacity, 0, 100);
+        settings.AppWindow.DisplayMode = AppWindowDisplayModes.Normalize(settings.AppWindow.DisplayMode);
+        settings.AppWindow.ImagePath ??= string.Empty;
+        if (settings.AppWindow.ImageStretch is not ("Uniform" or "UniformToFill" or "Fill" or "None"))
+            settings.AppWindow.ImageStretch = "Uniform";
         return settings;
     }
 }

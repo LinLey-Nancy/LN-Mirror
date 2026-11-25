@@ -5,6 +5,7 @@ using LNMirror.Core;
 using LNMirror.Core.Configuration;
 using LNMirror.Core.Diagnostics;
 using LNMirror.Views;
+using LNMirror.Core.Windowing;
 
 namespace LNMirror;
 
@@ -14,6 +15,7 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private ToolbarWindow? _toolbarWindow;
     private MirrorFrameOverlayWindow? _frameOverlay;
+    private AppWindowMaskWindow? _appMaskWindow;
     private TrayIconService? _tray;
     private bool _exitRequested;
     private System.Threading.Timer? _exitWatchdog;
@@ -27,6 +29,30 @@ public partial class App : Application
             AppLog.Error("[应用] 未处理的异常", args.ExceptionObject as Exception ?? new Exception(args.ExceptionObject?.ToString() ?? "未知"));
 
         var args = e.Args ?? Array.Empty<string>();
+
+        if (args.Any(a => a.Equals("--window-helper", StringComparison.OrdinalIgnoreCase)))
+        {
+            AppLog.Initialize(SettingsStore.LogDirectory);
+            try
+            {
+                int pipeIndex = Array.FindIndex(args, a => a.Equals("--pipe", StringComparison.OrdinalIgnoreCase));
+                int parentIndex = Array.FindIndex(args, a => a.Equals("--parent-pid", StringComparison.OrdinalIgnoreCase));
+                if (pipeIndex < 0 || pipeIndex + 1 >= args.Length || parentIndex < 0 || parentIndex + 1 >= args.Length
+                    || !int.TryParse(args[parentIndex + 1], out int parentProcessId))
+                    throw new ArgumentException("提权辅助参数不完整。");
+                string pipeName = args[pipeIndex + 1];
+                AppLog.Info($"[提权] 辅助进程启动，父进程 {parentProcessId}");
+                await WindowHelperServer.RunAsync(pipeName, parentProcessId);
+                AppLog.Info("[提权] 辅助进程正常退出");
+                Shutdown(0);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("[提权] 辅助进程异常退出", ex);
+                Shutdown(1);
+            }
+            return;
+        }
 
         if (args.Any(a => a.Equals("--version", StringComparison.OrdinalIgnoreCase)))
         {
@@ -62,14 +88,14 @@ public partial class App : Application
             return;
         }
 
+        var smoke = args.Any(a => a.Equals("--smoke-ui", StringComparison.OrdinalIgnoreCase));
+        // 冒烟检查只验证界面能不能起来：不连手机、不写回配置，
+        // 免得和正在运行的另一个实例抢会话或互相覆盖设置
+        if (smoke) SettingsStore.ReadOnly = true;
         _controller = new AppController(SettingsStore.Load(), Dispatcher);
 
-        var smoke = args.Any(a => a.Equals("--smoke-ui", StringComparison.OrdinalIgnoreCase));
         if (smoke)
         {
-            // 冒烟检查只验证界面能不能起来：不连手机、不写回配置，
-            // 免得和正在运行的另一个实例抢会话或互相覆盖设置
-            SettingsStore.ReadOnly = true;
             _controller.AllowAutoReconnect = false;
         }
 
@@ -81,6 +107,7 @@ public partial class App : Application
 
         _toolbarWindow = new ToolbarWindow(_controller, _tray);
         _frameOverlay = new MirrorFrameOverlayWindow(_controller);
+        _appMaskWindow = new AppWindowMaskWindow(_controller.Apps);
         _mainWindow = new MainWindow(_controller, _tray);
 
         await _controller.InitializeAsync();
@@ -244,6 +271,7 @@ public partial class App : Application
             _mainWindow?.AllowClose();
             _toolbarWindow?.Close();
             _frameOverlay?.Close();
+            _appMaskWindow?.Close();
         }
         catch (Exception ex)
         {

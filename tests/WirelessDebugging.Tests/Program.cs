@@ -1,7 +1,10 @@
+using System.IO;
+using System.IO.Pipes;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Windows.Controls;
+using Binding = System.Windows.Data.Binding;
 using System.Windows.Threading;
 using LNMirror.Core;
 using LNMirror.Core.Adb;
@@ -10,6 +13,9 @@ using LNMirror.Core.Devices;
 using LNMirror.Core.Scrcpy;
 using LNMirror.Core.Windowing;
 using LNMirror.Views;
+using TabControl = System.Windows.Controls.TabControl;
+using ListBox = System.Windows.Controls.ListBox;
+using Application = System.Windows.Application;
 
 const string connectAdvertisement = "adb-phone-TnSdi9 _adb-tls-connect._tcp 192.0.2.10:33015";
 const string pairAdvertisement = "adb-phone-QXjCrW _adb-tls-pairing._tcp 192.0.2.10:33861";
@@ -61,6 +67,274 @@ SettingsStore.ReadOnly = true;
 
 var cases = new (string Name, Action Check)[]
 {
+    ("原窗口完全透明时自动穿透，恢复显示后重新接收点击", () =>
+    {
+        var hidden = AppWindowAppearance.Resolve(AppWindowDisplayModes.Original, 0, false);
+        var shown = AppWindowAppearance.Resolve(AppWindowDisplayModes.Original, 65, false);
+        Require(hidden.TargetOpacity == 0 && hidden.TargetPassThrough && !hidden.MaskVisible);
+        Require(shown.TargetOpacity == 65 && !shown.TargetPassThrough && !shown.MaskVisible);
+    }),
+    ("图片覆盖模式保持原窗口可点击", () =>
+    {
+        var state = AppWindowAppearance.Resolve(AppWindowDisplayModes.Image, 45, false);
+        Require(state.TargetOpacity == 100 && !state.TargetPassThrough && state.MaskVisible);
+    }),
+    ("图片悬停模式只在指针离开后恢复图片", () =>
+    {
+        var shown = AppWindowAppearance.Resolve(AppWindowDisplayModes.ImageHoverReveal, 70, true);
+        var hidden = AppWindowAppearance.Resolve(AppWindowDisplayModes.ImageHoverReveal, 70, false);
+        Require(shown.TargetOpacity == 70 && !shown.TargetPassThrough && !shown.MaskVisible);
+        Require(hidden.TargetOpacity == 100 && !hidden.TargetPassThrough && hidden.MaskVisible);
+    }),
+    ("隐藏任务切换器不会保留强制任务栏样式或改动其他样式", () =>
+    {
+        const int unrelated = 0x00010000;
+        const int original = unrelated | 0x00040000;
+        int hidden = WindowTaskSwitcherStyles.Apply(original, true, original);
+        Require((hidden & 0x00000080) != 0);
+        Require((hidden & 0x00040000) == 0);
+        Require((hidden & unrelated) != 0);
+        int restored = WindowTaskSwitcherStyles.Apply(hidden, false, original);
+        Require(restored == original);
+    }),
+    ("通用窗口控制隐藏切换器后恢复目标原始样式", () => RunSta(() =>
+    {
+        var target = new System.Windows.Window { Title = "LN-Mirror 样式测试", Width = 320, Height = 200 };
+        target.Show();
+        try
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(target).Handle;
+            int original = TestNative.GetExStyle(handle);
+            using var controller = new WindowStyleController();
+            controller.Attach(handle);
+            Require(controller.ApplyTaskSwitcherHidden(true));
+            int hidden = TestNative.GetExStyle(handle);
+            Require((hidden & 0x00000080) != 0 && (hidden & 0x00040000) == 0);
+            controller.Detach();
+            Require(TestNative.GetExStyle(handle) == original);
+        }
+        finally
+        {
+            target.Close();
+        }
+    })),
+    ("通用窗口控制退出时移除自己添加的透明样式", () => RunSta(() =>
+    {
+        using var target = new System.Windows.Forms.Form
+        {
+            Text = "LN-Mirror 透明测试",
+            FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+            StartPosition = System.Windows.Forms.FormStartPosition.Manual,
+            Location = new System.Drawing.Point(-32000, 0),
+            Size = new System.Drawing.Size(320, 200),
+            ShowInTaskbar = false,
+        };
+        target.Show();
+        try
+        {
+            var handle = target.Handle;
+            int original = TestNative.GetExStyle(handle);
+            using var controller = new WindowStyleController();
+            controller.Attach(handle);
+            Require(controller.ApplyOpacity(37) is not null);
+            Require((TestNative.GetExStyle(handle) & 0x00080000) != 0);
+            controller.Detach();
+            Require(TestNative.GetExStyle(handle) == original);
+        }
+        finally
+        {
+            target.Close();
+        }
+    })),
+    ("切换应用目标会恢复旧窗口且退出时恢复当前窗口", () => RunSta(() =>
+    {
+        using var first = new System.Windows.Forms.Form
+        {
+            Text = "第一个目标", FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+            StartPosition = System.Windows.Forms.FormStartPosition.Manual,
+            Location = new System.Drawing.Point(-32000, 0), Size = new System.Drawing.Size(320, 200), ShowInTaskbar = false,
+        };
+        using var second = new System.Windows.Forms.Form
+        {
+            Text = "第二个目标", FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+            StartPosition = System.Windows.Forms.FormStartPosition.Manual,
+            Location = new System.Drawing.Point(-32000, 100), Size = new System.Drawing.Size(320, 200), ShowInTaskbar = false,
+        };
+        first.Show();
+        second.Show();
+        int firstOriginal = TestNative.GetExStyle(first.Handle);
+        int secondOriginal = TestNative.GetExStyle(second.Handle);
+        var controller = new DesktopAppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        controller.SelectWindow(DesktopWindowInfo.Read(first.Handle));
+        controller.Opacity = 37;
+        Require(TestNative.GetExStyle(first.Handle) != firstOriginal);
+        controller.SelectWindow(DesktopWindowInfo.Read(second.Handle));
+        Require(TestNative.GetExStyle(first.Handle) == firstOriginal);
+        Require(controller.SelectedWindow?.Handle == second.Handle);
+        controller.Dispose();
+        Require(TestNative.GetExStyle(second.Handle) == secondOriginal);
+        first.Close();
+        second.Close();
+    })),
+    ("图片覆盖层贴合目标并设置穿透不激活和隐藏样式", () => RunSta(() =>
+    {
+        EnsureApplication();
+        string imagePath = Path.Combine(Path.GetTempPath(), $"ln-mirror-mask-{Guid.NewGuid():N}.png");
+        using (var bitmap = new System.Drawing.Bitmap(24, 24))
+        {
+            using var graphics = System.Drawing.Graphics.FromImage(bitmap);
+            graphics.Clear(System.Drawing.Color.DarkBlue);
+            bitmap.Save(imagePath, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        using var target = new System.Windows.Forms.Form
+        {
+            Text = "图片覆盖目标", FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+            StartPosition = System.Windows.Forms.FormStartPosition.Manual,
+            Location = new System.Drawing.Point(100, 100), Size = new System.Drawing.Size(320, 200), ShowInTaskbar = false,
+        };
+        target.Show();
+        using var controller = new DesktopAppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        controller.SelectWindow(DesktopWindowInfo.Read(target.Handle));
+        Require(controller.ChooseImage(imagePath));
+        controller.SetDisplayMode(AppWindowDisplayModes.Image);
+        controller.Topmost = true;
+        var mask = new AppWindowMaskWindow(controller);
+        try
+        {
+            mask.SyncToTarget();
+            Require(mask.IsVisible && mask.Handle != IntPtr.Zero);
+            Require(TestNative.GetRect(mask.Handle) == TestNative.GetRect(target.Handle));
+            int exStyle = TestNative.GetExStyle(mask.Handle);
+            Require((exStyle & 0x00000020) != 0);
+            Require((exStyle & 0x00000080) != 0);
+            Require((exStyle & 0x08000000) != 0);
+            var targetRect = TestNative.GetRect(target.Handle);
+            int x = targetRect.Left + targetRect.Width / 2;
+            int y = targetRect.Top + targetRect.Height / 2;
+            TestNative.SetCursorPos(x, y);
+            IntPtr hit = TestNative.WindowFromPoint(x, y);
+            Require(TestNative.GetAncestor(hit, 2) == target.Handle);
+        }
+        finally
+        {
+            mask.Close();
+            target.Close();
+            File.Delete(imagePath);
+        }
+    })),
+    ("提权辅助协议验证目标身份并在分离时恢复窗口", () => RunStaAsync(TestHelperProtocol)),
+    ("统一恢复会释放当前应用窗口并还原其样式", () => RunSta(() =>
+    {
+        using var target = new System.Windows.Forms.Form
+        {
+            Text = "统一恢复目标", FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+            StartPosition = System.Windows.Forms.FormStartPosition.Manual,
+            Location = new System.Drawing.Point(-32000, 0), Size = new System.Drawing.Size(320, 200), ShowInTaskbar = false,
+        };
+        target.Show();
+        int original = TestNative.GetExStyle(target.Handle);
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        controller.Apps.SelectWindow(DesktopWindowInfo.Read(target.Handle));
+        controller.Apps.Opacity = 37;
+        controller.RestoreAllAsync().GetAwaiter().GetResult();
+        Require(!controller.Apps.HasTarget && TestNative.GetExStyle(target.Handle) == original);
+        target.Close();
+    })),
+    ("异常退出后下次启动按进程身份恢复目标原始样式", () => RunSta(() =>
+    {
+        string recoveryPath = Path.Combine(Path.GetTempPath(), $"ln-mirror-recovery-{Guid.NewGuid():N}.json");
+        using var target = new System.Windows.Forms.Form
+        {
+            Text = "崩溃恢复目标", FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+            StartPosition = System.Windows.Forms.FormStartPosition.Manual,
+            Location = new System.Drawing.Point(-32000, 0), Size = new System.Drawing.Size(320, 200), ShowInTaskbar = false,
+        };
+        target.Show();
+        int original = TestNative.GetExStyle(target.Handle);
+        SettingsStore.ReadOnly = false;
+        try
+        {
+            var abandoned = new DesktopAppController(new AppSettings(), Dispatcher.CurrentDispatcher, recoveryPath, _ => { });
+            abandoned.SelectWindow(DesktopWindowInfo.Read(target.Handle));
+            abandoned.Opacity = 37;
+            abandoned.TaskSwitcherHidden = true;
+            Require(TestNative.GetExStyle(target.Handle) != original);
+            using var restarted = new DesktopAppController(new AppSettings(), Dispatcher.CurrentDispatcher, recoveryPath, _ => { });
+            Require(TestNative.GetExStyle(target.Handle) == original);
+            abandoned.Dispose();
+            target.Close();
+        }
+        finally
+        {
+            SettingsStore.ReadOnly = true;
+            if (File.Exists(recoveryPath)) File.Delete(recoveryPath);
+        }
+    })),
+    ("窗口列表绑定刷新不会发生选择重入", () => RunSta(() =>
+    {
+        using var target = new System.Windows.Forms.Form
+        {
+            Text = "绑定刷新目标", FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+            StartPosition = System.Windows.Forms.FormStartPosition.Manual,
+            Location = new System.Drawing.Point(-32000, 0), Size = new System.Drawing.Size(320, 200), ShowInTaskbar = false,
+        };
+        using var other = new System.Windows.Forms.Form
+        {
+            Text = "绑定刷新另一窗口", FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+            StartPosition = System.Windows.Forms.FormStartPosition.Manual,
+            Location = new System.Drawing.Point(-32000, 200), Size = new System.Drawing.Size(320, 200), ShowInTaskbar = false,
+        };
+        target.Show();
+        other.Show();
+        using var controller = new DesktopAppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        var host = new System.Windows.Window
+        {
+            Width = 300, Height = 240, Left = -32000, Top = 0, ShowInTaskbar = false,
+            Content = new ListBox { ItemsSource = controller.Windows },
+        };
+        var list = (ListBox)host.Content;
+        list.SetBinding(ListBox.SelectedItemProperty, new Binding(nameof(DesktopAppController.SelectedWindow))
+        {
+            Source = controller,
+            Mode = System.Windows.Data.BindingMode.TwoWay,
+        });
+        host.Show();
+        list.SelectedItem = DesktopWindowInfo.Read(target.Handle);
+        bool raiseTarget = false;
+        using var reorder = new System.Threading.Timer(_ =>
+        {
+            raiseTarget = !raiseTarget;
+            TestNative.RaiseWindow(raiseTarget ? target.Handle : other.Handle);
+        }, null, 0, 5);
+        controller.Restore();
+        reorder.Dispose();
+        Require(!controller.HasTarget && list.SelectedItem is null);
+        host.Close();
+        target.Close();
+        other.Close();
+    })),
+    ("顶部主导航保留移动设备的左侧子导航和应用页", () => RunSta(() =>
+    {
+        EnsureApplication();
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        var window = new MainWindow(controller, null!);
+        try
+        {
+            var top = window.FindName("TopNavigation") as TabControl;
+            var mobile = window.FindName("Navigation") as TabControl;
+            Require(top is not null && mobile is not null);
+            Require(top!.Items.Cast<TabItem>().Select(item => item.Header as string)
+                .SequenceEqual(["移动设备", "应用"]));
+            Require(mobile!.TabStripPlacement == Dock.Left);
+            Require(mobile.Items.Count == 4);
+            Require(window.FindName("AppWindowList") is ListBox);
+        }
+        finally
+        {
+            window.AllowClose();
+            window.Close();
+        }
+    })),
     ("智能悬停忽略路过的指针，停稳后显示并在离开时隐藏", () =>
     {
         var watcher = new MirrorHoverWatcher(() => null);
@@ -106,8 +380,7 @@ var cases = new (string Name, Action Check)[]
     }),
     ("工具条连接标签不随悬停显隐刷新", () => RunSta(() =>
     {
-        var app = new LNMirror.App();
-        app.InitializeComponent();
+        EnsureApplication();
         using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
         SetControllerField(controller, "_phase", ConnectionPhase.Connected);
         SetControllerField(controller, "_hoverRevealEnabled", true);
@@ -532,6 +805,77 @@ static void ApplySnapshot(AppController controller, params string[] advertisemen
     applySnapshot.Invoke(controller, [services]);
 }
 
+static async Task TestHelperProtocol()
+{
+    using var target = new System.Windows.Forms.Form
+    {
+        Text = "提权辅助协议目标", FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+        StartPosition = System.Windows.Forms.FormStartPosition.Manual,
+        Location = new System.Drawing.Point(-32000, 0), Size = new System.Drawing.Size(320, 200), ShowInTaskbar = false,
+    };
+    target.Show();
+    int original = TestNative.GetExStyle(target.Handle);
+    string pipeName = $"ln-mirror-test-{Guid.NewGuid():N}";
+    using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1,
+        PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+    Task helper = WindowHelperServer.RunAsync(pipeName, Environment.ProcessId);
+    using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    await server.WaitForConnectionAsync(cancel.Token);
+    using var connection = new WindowHelperConnection(server);
+    var info = DesktopWindowInfo.Read(target.Handle);
+    var rejected = await connection.SendAsync(new WindowHelperRequest
+    {
+        Command = "attach", Handle = info.Handle.ToInt64(), ProcessId = info.ProcessId + 1,
+        ProcessStartTimeTicks = info.ProcessStartTimeTicks,
+    });
+    Require(!rejected.Ok);
+    var attached = await connection.SendAsync(new WindowHelperRequest
+    {
+        Command = "attach", Handle = info.Handle.ToInt64(), ProcessId = info.ProcessId,
+        ProcessStartTimeTicks = info.ProcessStartTimeTicks,
+    });
+    Require(attached.Ok);
+    var changed = await connection.SendAsync(new WindowHelperRequest { Command = "opacity", Value = 37 });
+    Require(changed.Ok && (TestNative.GetExStyle(target.Handle) & 0x00080000) != 0);
+    var detached = await connection.SendAsync(new WindowHelperRequest { Command = "detach" });
+    Require(detached.Ok && TestNative.GetExStyle(target.Handle) == original);
+    connection.Dispose();
+    await helper.WaitAsync(TimeSpan.FromSeconds(2));
+    if (target.InvokeRequired) target.Invoke(new Action(target.Close));
+    else target.Close();
+}
+
+static void EnsureApplication()
+{
+    if (Application.Current is not null) return;
+    var app = new LNMirror.App();
+    app.InitializeComponent();
+}
+
+static void RunStaAsync(Func<Task> check)
+{
+    Exception? failure = null;
+    var thread = new Thread(() =>
+    {
+        try
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var task = check();
+            task.ContinueWith(_ => dispatcher.InvokeShutdown(), TaskScheduler.Default);
+            Dispatcher.Run();
+            task.GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start();
+    thread.Join();
+    if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+}
+
 static void RunSta(Action check)
 {
     Exception? failure = null;
@@ -600,3 +944,53 @@ static ScrcpyStartOptions EnableWirelessSmoothing(string serial)
 
 static void SetControllerField(AppController controller, string name, object value)
     => typeof(AppController).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(controller, value);
+
+static class TestNative
+{
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+
+    public static int GetExStyle(IntPtr hWnd)
+        => unchecked((int)GetWindowLongPtr(hWnd, -20).ToInt64());
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+    public static WindowRect GetRect(IntPtr hWnd)
+    {
+        GetWindowRect(hWnd, out var rect);
+        return new WindowRect(rect.Left, rect.Top, rect.Right, rect.Bottom);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int x, int y, int cx, int cy, uint flags);
+
+    public static void RaiseWindow(IntPtr hWnd)
+        => SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(POINT point);
+
+    public static IntPtr WindowFromPoint(int x, int y) => WindowFromPoint(new POINT { X = x, Y = y });
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+}

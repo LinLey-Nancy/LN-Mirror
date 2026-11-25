@@ -18,8 +18,10 @@ internal static class NativeMethods
     internal const int WS_SYSMENU = unchecked((int)0x00080000);
     internal const int WS_MINIMIZEBOX = unchecked((int)0x00020000);
 
+    internal const int WS_EX_TOPMOST = 0x00000008;
     internal const int WS_EX_TRANSPARENT = 0x00000020;
     internal const int WS_EX_TOOLWINDOW = 0x00000080;
+    internal const int WS_EX_APPWINDOW = 0x00040000;
     internal const int WS_EX_LAYERED = 0x00080000;
     internal const int WS_EX_NOACTIVATE = 0x08000000;
 
@@ -141,6 +143,19 @@ internal static class NativeMethods
     internal static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
 
     internal const uint GA_ROOT = 2;
+    internal const uint GW_OWNER = 4;
+    internal const uint GW_HWNDPREV = 3;
+    internal const int DWMWA_CLOAKED = 14;
+    internal const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    [DllImport("dwmapi.dll")]
+    internal static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
 
     [DllImport("user32.dll")]
     internal static extern bool GetCursorPos(out POINT lpPoint);
@@ -227,19 +242,32 @@ internal static class NativeMethods
 
     /// <summary>改写窗口样式并强制刷新非客户区，让标题栏/边框立刻生效。</summary>
     internal static bool SetWindowStyle(IntPtr hWnd, int style)
-    {
-        SetWindowLongPtrSafe(hWnd, GWL_STYLE, new IntPtr(style));
-        SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-        return true;
-    }
+        => SetWindowLongAndRefresh(hWnd, GWL_STYLE, style);
 
     internal static bool SetWindowExStyle(IntPtr hWnd, int style)
+        => SetWindowLongAndRefresh(hWnd, GWL_EXSTYLE, style);
+
+    private static bool SetWindowLongAndRefresh(IntPtr hWnd, int index, int style)
     {
-        SetWindowLongPtrSafe(hWnd, GWL_EXSTYLE, new IntPtr(style));
-        // 样式变化后强制刷新非客户区，否则部分外观不会立刻生效
+        Marshal.SetLastPInvokeError(0);
+        IntPtr previous = SetWindowLongPtrSafe(hWnd, index, new IntPtr(style));
+        int error = Marshal.GetLastPInvokeError();
+        if (previous == IntPtr.Zero && error != 0)
+        {
+            Marshal.SetLastPInvokeError(error);
+            return false;
+        }
+
         SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        int actual = index == GWL_EXSTYLE ? GetWindowExStyle(hWnd) : GetWindowStyle(hWnd);
+        if (actual != style)
+        {
+            Marshal.SetLastPInvokeError(2002);
+            return false;
+        }
+
+        Marshal.SetLastPInvokeError(0);
         return true;
     }
 

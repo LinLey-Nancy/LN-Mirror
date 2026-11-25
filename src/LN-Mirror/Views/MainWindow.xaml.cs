@@ -7,6 +7,7 @@ using LNMirror.Core;
 using LNMirror.Core.Adb;
 using LNMirror.Core.Configuration;
 using LNMirror.Core.Diagnostics;
+using TabItem = System.Windows.Controls.TabItem;
 
 namespace LNMirror.Views;
 
@@ -111,6 +112,7 @@ public partial class MainWindow : Window
         PairCodeBox.Clear();
         PairingMessage.Visibility = Visibility.Collapsed;
         PairingOverlay.Visibility = Visibility.Visible;
+        TopNavigation.IsEnabled = false;
         Navigation.IsEnabled = false;
         if (address is null) PairAddressBox.Focus();
         else PairCodeBox.Focus();
@@ -122,6 +124,7 @@ public partial class MainWindow : Window
         PairAddressBox.Clear();
         PairingMessage.Text = string.Empty;
         PairingOverlay.Visibility = Visibility.Collapsed;
+        TopNavigation.IsEnabled = true;
         Navigation.IsEnabled = true;
         if (_pairingReturnFocus is { } previous && Keyboard.Focus(previous) != previous)
             AddDeviceButton.Focus();
@@ -299,6 +302,30 @@ public partial class MainWindow : Window
         await _controller.RestoreAsync();
         _tray.ShowToolbar();
     }
+
+    private void OnTopNavigationSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (TopNavigation.SelectedItem is TabItem { Header: "应用" }) _controller.Apps.RefreshWindows();
+    }
+
+    private void OnRefreshAppWindowsClick(object sender, RoutedEventArgs e) => _controller.Apps.RefreshWindows();
+
+    private void OnChooseAppImageClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择窗口覆盖图片",
+            Filter = "图片文件|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.ico|所有文件|*.*",
+            CheckFileExists = true,
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) == true) _controller.Apps.ChooseImage(dialog.FileName);
+    }
+
+    private async void OnElevateAppWindowClick(object sender, RoutedEventArgs e)
+        => await _controller.Apps.RetryWithElevationAsync();
+
+    private void OnRestoreAppWindowClick(object sender, RoutedEventArgs e) => _controller.Apps.Restore();
 
     private async void OnVerifyPassThroughClick(object sender, RoutedEventArgs e)
         => await _controller.VerifyPassThroughAsync();

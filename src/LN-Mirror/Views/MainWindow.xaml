@@ -17,25 +17,43 @@
     </Window.Resources>
 
     <Grid Background="{StaticResource CenterFrame}" TextElement.Foreground="{StaticResource CenterInk}">
-        <TabControl x:Name="Navigation" TabStripPlacement="Left" ItemContainerStyle="{StaticResource CenterNav}">
+        <TabControl x:Name="TopNavigation" TabStripPlacement="Top" ItemContainerStyle="{StaticResource CenterTopNav}"
+                    AutomationProperties.Name="主导航" SelectionChanged="OnTopNavigationSelectionChanged">
             <TabControl.Template>
                 <ControlTemplate TargetType="TabControl">
                     <Grid>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="48"/>
+                            <RowDefinition Height="52"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
+                        <Grid Grid.Row="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="184"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" Margin="18,0,0,0" VerticalAlignment="Center">
+                                <Image Source="/LN-Mirror;component/Assets/app.png" Width="24" Height="24" Margin="0,0,8,0"/>
+                                <TextBlock Text="LN-Mirror" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" IsItemsHost="True" VerticalAlignment="Center"/>
+                        </Grid>
+                        <ContentPresenter Grid.Row="1" x:Name="PART_SelectedContentHost" ContentSource="SelectedContent" Margin="0"
+                                          KeyboardNavigation.TabNavigation="Local"/>
+                    </Grid>
+                </ControlTemplate>
+            </TabControl.Template>
+            <TabItem Header="移动设备">
+        <TabControl x:Name="Navigation" TabStripPlacement="Left" ItemContainerStyle="{StaticResource CenterNav}">
+            <TabControl.Template>
+                <ControlTemplate TargetType="TabControl">
+                    <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="166"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel Orientation="Horizontal" Margin="18,0,0,0" VerticalAlignment="Center">
-                            <Image Source="/LN-Mirror;component/Assets/app.png" Width="24" Height="24" Margin="0,0,8,0"/>
-                            <TextBlock Text="LN-Mirror" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                        </StackPanel>
-                        <DockPanel Grid.Row="1" IsItemsHost="True" LastChildFill="False" Margin="10,4"
+                        <DockPanel IsItemsHost="True" LastChildFill="False" Margin="10,4"
                                    KeyboardNavigation.TabNavigation="Once"/>
-                        <Border Grid.Row="1" Grid.Column="1" Margin="0,0,8,8" CornerRadius="16"
+                        <Border Grid.Column="1" Margin="0,0,8,8" CornerRadius="16"
                                 Background="{StaticResource CenterSurface}" BorderBrush="{StaticResource CenterLine}" BorderThickness="1">
                             <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent" Margin="0"
                                               KeyboardNavigation.TabNavigation="Local"/>
@@ -563,8 +581,118 @@
                 </ScrollViewer>
             </TabItem>
         </TabControl>
+            </TabItem>
 
-        <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="178,0,16,0" Height="46">
+            <TabItem Header="应用">
+                <Border Margin="0,0,8,8" CornerRadius="16" Background="{StaticResource CenterSurface}"
+                        BorderBrush="{StaticResource CenterLine}" BorderThickness="1">
+                    <Grid Margin="24,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="300"/>
+                            <ColumnDefinition Width="20"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <DockPanel>
+                            <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
+                                <TextBlock Text="当前窗口" Style="{StaticResource CenterPageTitle}" FontSize="20"/>
+                                <Button Content="↻" HorizontalAlignment="Right" Width="36" Style="{StaticResource CenterAction}"
+                                        AutomationProperties.Name="刷新窗口列表" ToolTip="刷新窗口列表" Click="OnRefreshAppWindowsClick"/>
+                            </Grid>
+                            <Border Background="{StaticResource CenterSoft}" CornerRadius="7" Padding="8,6" DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                <TextBlock Style="{StaticResource CenterNote}" Text="仅列出普通可见窗口。首版同时管理一个主窗口，不包含独立弹窗。"/>
+                            </Border>
+                            <ListBox x:Name="AppWindowList" ItemsSource="{Binding Apps.Windows}" SelectedItem="{Binding Apps.SelectedWindow, Mode=TwoWay}"
+                                     AutomationProperties.Name="可管理的应用窗口" BorderThickness="0" Background="Transparent"
+                                     ItemContainerStyle="{StaticResource CenterAppWindowRow}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="34"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="28" Height="28" Background="{StaticResource CenterSelection}" CornerRadius="6">
+                                                <Image Source="{Binding Icon}" Width="20" Height="20"/>
+                                            </Border>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayTitle}"/>
+                                                <TextBlock Text="{Binding ProcessDisplay}" Style="{StaticResource CenterNote}" TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+
+                        <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <TextBlock Text="窗口外观" Style="{StaticResource CenterPageTitle}"/>
+                                <TextBlock Text="{Binding Apps.TargetTitle}" FontSize="16" FontWeight="SemiBold" Margin="0,14,0,2" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding Apps.TargetProcess}" Style="{StaticResource CenterNote}"/>
+                                <TextBlock Text="{Binding Apps.StatusText}" Style="{StaticResource CenterNote}" Margin="0,8,0,0"/>
+                                <TextBlock Text="{Binding Apps.Notice}" Foreground="{StaticResource ErrBrush}" TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0"/>
+
+                                <Border Style="{StaticResource CenterPanel}" Background="{StaticResource CenterSoft}" Padding="14" Margin="0,14,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="显示方式" Style="{StaticResource CenterSectionTitle}"/>
+                                        <ComboBox Margin="0,10,0,0" Style="{StaticResource CenterFieldCombo}"
+                                                  ItemsSource="{Binding Apps.DisplayModeOptions}" DisplayMemberPath="DisplayName" SelectedValuePath="Key"
+                                                  SelectedValue="{Binding Apps.DisplayMode, Mode=TwoWay}" IsEnabled="{Binding Apps.IsManageEnabled}"
+                                                  AutomationProperties.Name="应用窗口显示方式"/>
+                                        <DockPanel Margin="0,12,0,0">
+                                            <Button DockPanel.Dock="Right" Content="选择图片…" Style="{StaticResource CenterOutline}"
+                                                    Click="OnChooseAppImageClick" IsEnabled="{Binding Apps.IsManageEnabled}"/>
+                                            <TextBlock Text="{Binding Apps.ImageName}" Style="{StaticResource CenterNote}" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Apps.ImagePath}"/>
+                                        </DockPanel>
+                                        <DockPanel Margin="0,10,0,0">
+                                            <TextBlock Text="图片填充" VerticalAlignment="Center"/>
+                                            <ComboBox Width="150" HorizontalAlignment="Right" Style="{StaticResource CenterFieldCombo}"
+                                                      ItemsSource="{Binding Apps.ImageStretchOptions}" SelectedItem="{Binding Apps.ImageStretch, Mode=TwoWay}"
+                                                      IsEnabled="{Binding Apps.IsManageEnabled}" AutomationProperties.Name="图片填充方式"/>
+                                        </DockPanel>
+                                        <TextBlock Margin="0,10,0,0" Style="{StaticResource CenterNote}"
+                                                   Text="图片模式下降低不透明度会透出原窗口。始终显示图片时，操作反馈仍会被图片遮挡。"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource CenterPanel}" Background="{StaticResource CenterSoft}" Padding="14" Margin="0,12,0,0">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock Text="{Binding Apps.OpacityLabel}" VerticalAlignment="Center"/>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                <TextBox Text="{Binding Apps.Opacity, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" Width="46"
+                                                         IsEnabled="{Binding Apps.IsManageEnabled}" PreviewTextInput="OnOpacityPreviewInput"
+                                                         AutomationProperties.Name="应用窗口不透明度百分比"/>
+                                                <TextBlock Text="%" VerticalAlignment="Center" Margin="3,0,0,0"/>
+                                            </StackPanel>
+                                        </DockPanel>
+                                        <Slider Minimum="0" Maximum="100" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                Value="{Binding Apps.Opacity, Mode=TwoWay}" IsEnabled="{Binding Apps.IsManageEnabled}"
+                                                Style="{StaticResource CenterSlider}" Margin="0,8" AutomationProperties.Name="应用窗口不透明度"/>
+                                        <CheckBox Content="窗口置顶" IsChecked="{Binding Apps.Topmost, Mode=TwoWay}"
+                                                  IsEnabled="{Binding Apps.IsManageEnabled}" Style="{StaticResource CenterSettingCheck}"/>
+                                        <CheckBox Content="隐藏 Alt+Tab / Win+Tab 条目" IsChecked="{Binding Apps.TaskSwitcherHidden, Mode=TwoWay}"
+                                                  IsEnabled="{Binding Apps.IsManageEnabled}" Style="{StaticResource CenterSettingCheck}"/>
+                                        <TextBlock Style="{StaticResource CenterNote}" Text="隐藏切换器条目通常也会隐藏任务栏按钮；Win+Tab 以具体应用的实际表现为准。"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <DockPanel Margin="0,12,0,0">
+                                    <Button Content="使用管理员权限重试" Style="{StaticResource CenterPrimary}"
+                                            Visibility="{Binding Apps.CanRequestElevation, Converter={StaticResource BoolToVis}}"
+                                            IsEnabled="{Binding Apps.CanRequestElevation}" Click="OnElevateAppWindowClick"/>
+                                    <Button Content="结束管理并恢复" Style="{StaticResource CenterOutline}" HorizontalAlignment="Right"
+                                            Click="OnRestoreAppWindowClick" IsEnabled="{Binding Apps.HasTarget}"/>
+                                </DockPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+            </TabItem>
+        </TabControl>
+
+        <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="390,0,16,0" Height="46" IsHitTestVisible="False">
             <TextBlock Text="{Binding Notice}" Style="{StaticResource CenterNote}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                        TextWrapping="NoWrap" ToolTip="{Binding Notice}" AutomationProperties.LiveSetting="Polite"/>
         </Border>
