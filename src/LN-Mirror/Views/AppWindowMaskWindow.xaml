@@ -1,0 +1,19 @@
+<Window x:Class="LNMirror.Views.AppWindowMaskWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="{x:Null}"
+        ShowInTaskbar="False"
+        Topmost="False"
+        ResizeMode="NoResize"
+        SizeToContent="Manual"
+        Focusable="False"
+        ShowActivated="False"
+        Left="-32000" Top="0" Width="1" Height="1"
+        Title="LN-Mirror 图片覆盖">
+    <Grid IsHitTestVisible="False" Background="Transparent">
+        <Image Source="{Binding MaskImage}" Opacity="{Binding MaskOpacity}" Stretch="{Binding MaskStretch}"
+               IsHitTestVisible="False"/>
+    </Grid>
+</Window>

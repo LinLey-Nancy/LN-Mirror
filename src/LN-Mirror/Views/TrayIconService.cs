@@ -29,7 +29,7 @@ public sealed class TrayIconService : IDisposable
         var menu = new ContextMenuStrip();
         menu.Items.Add("显示主窗口", null, (_, _) => _showMainWindow());
         _showToolbarItem = (ToolStripMenuItem)menu.Items.Add("显示工具条", null, (_, _) => _showToolbar());
-        _restoreItem = (ToolStripMenuItem)menu.Items.Add("恢复 100（取消穿透并找回画面）", null, async (_, _) => await _controller.RestoreAsync());
+        _restoreItem = (ToolStripMenuItem)menu.Items.Add("恢复手机画面与应用窗口", null, async (_, _) => await _controller.RestoreAllAsync());
         _disconnectItem = (ToolStripMenuItem)menu.Items.Add("断开", null, async (_, _) => await _controller.DisconnectAsync("已从托盘断开"));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出 LN-Mirror", null, (_, _) => _exit());
@@ -45,6 +45,7 @@ public sealed class TrayIconService : IDisposable
         _icon.DoubleClick += (_, _) => _showMainWindow();
 
         _controller.PropertyChanged += (_, _) => System.Windows.Application.Current?.Dispatcher.Invoke(UpdateMenuState);
+        _controller.Apps.PropertyChanged += (_, _) => System.Windows.Application.Current?.Dispatcher.Invoke(UpdateMenuState);
         UpdateMenuState();
     }
 
@@ -53,7 +54,7 @@ public sealed class TrayIconService : IDisposable
         if (_disposed) return;
         bool connected = _controller.IsConnected;
         _showToolbarItem.Enabled = connected;
-        _restoreItem.Enabled = connected;
+        _restoreItem.Enabled = connected || _controller.Apps.HasTarget;
         _disconnectItem.Enabled = connected;
     }
 

@@ -34,6 +34,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private readonly MirrorWindowController _window = new();
     private readonly MirrorHoverWatcher _hoverWatcher;
     private readonly Dispatcher _dispatcher;
+    private readonly DesktopAppController _apps;
 
     private ScrcpyRuntime? _runtime;
     private AdbClient? _adb;
@@ -83,6 +84,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
         _hoverWatcher = new MirrorHoverWatcher(() => _window.GetContentRect());
         _hoverWatcher.HoverChanged += OnHoverChanged;
+        _apps = new DesktopAppController(settings, dispatcher);
         ApplyHoverDelay();
 
         foreach (var entry in settings.LanDevices.OrderByDescending(d => d.LastConnectedAt))
@@ -102,6 +104,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public bool AllowAutoReconnect { get; set; } = true;
 
     public MirrorWindowController Window => _window;
+
+    public DesktopAppController Apps => _apps;
 
     public ObservableCollection<AdbDevice> Devices { get; } = new();
 
@@ -1563,6 +1567,13 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         Notice = "已恢复为 100% 并取消穿透。";
     }
 
+    public async Task RestoreAllAsync()
+    {
+        bool restoreApps = Apps.HasTarget;
+        await RestoreAsync().ConfigureAwait(true);
+        if (restoreApps) Apps.Restore();
+    }
+
     public async Task VerifyPassThroughAsync(bool showNotice = true)
     {
         var session = _session;
@@ -1662,7 +1673,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             if (name == "恢复 100")
             {
-                await RestoreAsync().ConfigureAwait(true);
+                await RestoreAllAsync().ConfigureAwait(true);
             }
             else if (name == "穿透切换")
             {
@@ -1705,6 +1716,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         catch (Exception ex) { AppLog.Warn($"[应用] 退出时结束投屏会话失败：{ex.Message}"); }
 
         try { _window.Dispose(); }
+        catch { /* 忽略 */ }
+
+        try { _apps.Dispose(); }
         catch { /* 忽略 */ }
 
         try { _hotKeys?.Dispose(); }
