@@ -49,6 +49,12 @@ if (args is ["screenshot-hover-off", var hoverOffPath])
     return 0;
 }
 
+if (args is ["screenshot-settings", var settingsPath])
+{
+    CaptureReadmeScreenshot(settingsPath, settingsPage: true);
+    return 0;
+}
+
 if (args is ["screenshot-toolbar", var toolbarScreenshotPath])
 {
     CaptureToolbarScreenshot(toolbarScreenshotPath);
@@ -1774,7 +1780,7 @@ static ScrcpyStartOptions EnableWirelessSmoothing(string serial)
 static void SetControllerField(AppController controller, string name, object value)
     => typeof(AppController).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(controller, value);
 
-static void CaptureReadmeScreenshot(string path, bool hoverEnabled = true)
+static void CaptureReadmeScreenshot(string path, bool hoverEnabled = true, bool settingsPage = false)
 {
     TestNative.SetProcessDPIAware();
     Exception? failure = null;
@@ -1801,7 +1807,11 @@ static void CaptureReadmeScreenshot(string path, bool hoverEnabled = true)
             };
             window.Show();
             ApplyDeviceSnapshot(controller, $"{usbDemoDevice}\n{wirelessDemoDevice}");
-            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+
+            if (settingsPage && window.FindName("Navigation") is TabControl navigation)
+            {
+                navigation.SelectedIndex = 1;
+            }            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
             timer.Tick += (_, _) =>
             {
                 timer.Stop();

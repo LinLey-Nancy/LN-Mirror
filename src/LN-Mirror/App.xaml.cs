@@ -89,6 +89,14 @@ public partial class App : Application
         }
 
         var smoke = args.Any(a => a.Equals("--smoke-ui", StringComparison.OrdinalIgnoreCase));
+        int smokeSeconds = 3;
+        int smokeSecondsIndex = Array.FindIndex(args, a => a.Equals("--smoke-seconds", StringComparison.OrdinalIgnoreCase));
+        if (smokeSecondsIndex >= 0 && smokeSecondsIndex + 1 < args.Length
+            && int.TryParse(args[smokeSecondsIndex + 1], out int parsedSmokeSeconds) && parsedSmokeSeconds > 0)
+        {
+            smokeSeconds = parsedSmokeSeconds;
+        }
+
         // 冒烟检查只验证界面能不能起来：不连手机、不写回配置，
         // 免得和正在运行的另一个实例抢会话或互相覆盖设置
         if (smoke) SettingsStore.ReadOnly = true;
@@ -130,8 +138,8 @@ public partial class App : Application
         {
             // 界面冒烟检查：窗口真实创建并显示若干秒，确认没有启动期异常后自动退出。
             // 退出走的是和托盘"退出"完全同一条路径，顺带把退出流程也验一遍。
-            AppLog.Info("[冒烟] 界面已显示，3 秒后自动退出");
-            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            AppLog.Info($"[冒烟] 界面已显示，{smokeSeconds} 秒后自动退出");
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(smokeSeconds) };
             timer.Tick += (_, _) =>
             {
                 timer.Stop();

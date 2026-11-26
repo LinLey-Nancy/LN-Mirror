@@ -35,7 +35,7 @@
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="0,0,8,0">
                     <TextBlock Text="不透明度" VerticalAlignment="Center"/>
                     <views:HelpTip Text="拖动滑块或输入百分比调整画面不透明度。0% 时画面看不见，也不接收点击。"
-                                   AutomationProperties.Name="不透明度说明" Margin="2,0,0,0"/>
+                                   AutomationProperties.Name="不透明度说明"/>
                 </StackPanel>
                 <Slider Grid.Column="1" Width="86" Minimum="0" Maximum="100" TickFrequency="1" TickPlacement="BottomRight"
                         IsSnapToTickEnabled="True" SmallChange="1" LargeChange="5"
@@ -50,7 +50,7 @@
                                   Content="{Binding PassThroughButtonText}"
                                   IsChecked="{Binding PassThrough, Mode=TwoWay}" IsEnabled="{Binding PassThroughEnabled}"/>
                     <views:HelpTip Text="开关鼠标穿透：打开后点击会穿过画面落到下面的窗口。"
-                                   AutomationProperties.Name="鼠标穿透说明" Margin="2,0,0,0"/>
+                                   AutomationProperties.Name="鼠标穿透说明"/>
                 </StackPanel>
 
                 <ToggleButton Grid.Column="5" Style="{StaticResource ToggleButtonFlat}"
@@ -61,10 +61,10 @@
                     <Button Content="恢复 100" Style="{StaticResource PrimaryButton}" Click="OnRestoreClick"
                             Padding="10,4" MinHeight="26" FontSize="12"/>
                     <views:HelpTip Text="恢复 100% 不透明度、取消穿透，并把画面移回可见位置。"
-                                   AutomationProperties.Name="恢复 100 说明" Margin="2,0,0,0"/>
+                                   AutomationProperties.Name="恢复 100 说明"/>
                 </StackPanel>
 
-                <views:HelpTip x:Name="DragHelp" Grid.Column="7" Margin="2,0,0,0"
+                <views:HelpTip x:Name="DragHelp" Grid.Column="7"
                                Text="按住工具条的空白处可以移动工具条。"
                                AutomationProperties.Name="工具条拖动说明"/>
             </Grid>

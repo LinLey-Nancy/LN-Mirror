@@ -91,6 +91,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\make-icon.ps1
 | 开关 | 作用 |
 |---|---|
 | `--smoke-ui` | 界面检查：显示主窗口和工具条 3 秒后自动退出，退出码 0 表示启动无异常。不连接手机，不写配置 |
+| `--smoke-seconds <秒>` | 配合 `--smoke-ui`，调整界面检查实例自动退出的时间，默认 3 秒 |
 | `--exit-after <秒>` | 运行 N 秒后自动退出，退出路径与托盘「退出」完全相同，用于验证退出流程（会按设置连接手机） |
 | `--self-test` | 弹窗形式的环境自检：引擎、adb、配置目录、窗口透明设置的读取与写入 |
 | `--self-test --report <路径>` | 同上，但把检查结果写到文件，便于自动化核对 |
