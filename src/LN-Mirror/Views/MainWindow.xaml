@@ -204,7 +204,7 @@
                                                     <StackPanel Orientation="Horizontal">
                                                         <TextBlock Text="手动连接" FontWeight="SemiBold"/>
                                                         <views:HelpTip Text="填写手机「无线调试」主页显示的 IP 和端口，不是配对窗口里的端口。"
-                                                                       AutomationProperties.Name="手动连接地址说明" Margin="2,0,0,0"/>
+                                                                       AutomationProperties.Name="手动连接地址说明"/>
                                                     </StackPanel>
                                                     <TextBlock Text="填写「无线调试」主页的 IP 和端口。" Style="{StaticResource CenterNote}" Margin="0,3,0,5"/>
                                                     <DockPanel>
@@ -244,7 +244,7 @@
                                                     <StackPanel Orientation="Horizontal" Margin="0,12,0,4">
                                                         <TextBlock Text="USB 转无线" FontWeight="SemiBold"/>
                                                         <views:HelpTip Text="填写手机 IP，默认端口 5555。仅用于可信局域网；手机需先用数据线连接并授权。"
-                                                                       AutomationProperties.Name="USB 转无线说明" Margin="2,0,0,0"/>
+                                                                       AutomationProperties.Name="USB 转无线说明"/>
                                                     </StackPanel>
                                                     <TextBlock Text="仅用于可信局域网。请先用数据线连接手机并允许 USB 调试。" Style="{StaticResource CenterNote}" Margin="0,0,0,5"/>
                                                     <DockPanel>
@@ -323,17 +323,17 @@
                                                 <ToggleButton Content="鼠标穿透" IsChecked="{Binding PassThrough, Mode=TwoWay}"
                                                               IsEnabled="{Binding PassThroughEnabled}" Style="{StaticResource CenterQuickToggle}"/>
                                                 <views:HelpTip Text="开启后，点击会穿过画面落到下方窗口，手机不接收这次点击。画面完全透明时也会自动不接收点击。"
-                                                               AutomationProperties.Name="鼠标穿透说明" Margin="2,0,0,0"/>
+                                                               AutomationProperties.Name="鼠标穿透说明"/>
                                             </StackPanel>
                                             <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
                                                 <ToggleButton Content="{Binding TopmostButtonText}" IsChecked="{Binding Topmost, Mode=TwoWay}"
                                                               Style="{StaticResource CenterQuickToggle}"/>
                                                 <views:HelpTip Text="让画面始终显示在其他窗口之上。画面不置顶时位置提示不会出现；鼠标落在画面可见部分上时，拖动把手仍会出现。"
-                                                               AutomationProperties.Name="置顶说明" Margin="2,0,0,0"/>
+                                                               AutomationProperties.Name="置顶说明"/>
                                             </StackPanel>
                                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                                 <views:HelpTip Text="恢复 100% 不透明度、关闭鼠标穿透，并把画面移回可见显示器。"
-                                                               AutomationProperties.Name="找回画面说明" Margin="0,0,2,0"/>
+                                                               AutomationProperties.Name="找回画面说明" Margin="0,0,4,0"/>
                                                 <Button Content="找回画面" Style="{StaticResource CenterAction}" Click="OnRestoreClick" IsEnabled="{Binding IsConnected}"/>
                                             </StackPanel>
                                         </DockPanel>
@@ -485,10 +485,18 @@
                                 <DockPanel Margin="0,10,0,0">
                                     <ComboBox DockPanel.Dock="Right" Width="166" Margin="8,0,0,0" Style="{StaticResource CenterFieldCombo}"
                                               ItemsSource="{Binding WirelessBufferDurations}" SelectedItem="{Binding WirelessVideoBufferMs}"
-                                              AutomationProperties.Name="无线画面缓冲（毫秒）"/>
-                                    <TextBlock Text="无线画面缓冲（ms）" VerticalAlignment="Center"/>
-                                    <views:HelpTip Text="0 ms 优先响应。增加缓冲可减少短时抖动，画面反馈也会稍晚。重连后生效。"
-                                                   AutomationProperties.Name="无线画面缓冲说明" Margin="2,0,0,0"/>
+                                              AutomationProperties.Name="无线画面缓冲（毫秒）">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding StringFormat={}{0} ms}"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="无线画面缓冲" VerticalAlignment="Center"/>
+                                        <views:HelpTip Text="0 ms 优先响应。增加缓冲可减少短时抖动，画面反馈也会稍晚。重连后生效。"
+                                                       AutomationProperties.Name="无线画面缓冲说明"/>
+                                    </StackPanel>
                                 </DockPanel>
                                 <CheckBox Content="投屏时保持手机常亮（需供电）" IsChecked="{Binding KeepAwake}" Style="{StaticResource CenterSettingCheck}"/>
                                 <CheckBox IsChecked="{Binding LanAutoReconnect}" Style="{StaticResource CenterSettingCheck}">
@@ -523,7 +531,7 @@
                                     <DockPanel>
                                         <TextBlock Text="渲染后端" VerticalAlignment="Center"/>
                                         <views:HelpTip Text="透明度不生效或画面全黑时，可尝试 software 或 opengl；改完需要「应用设置并重连」。"
-                                                       AutomationProperties.Name="渲染后端说明" Margin="2,0,0,0"/>
+                                                       AutomationProperties.Name="渲染后端说明"/>
                                         <ComboBox Style="{StaticResource CenterFieldCombo}" ItemsSource="{Binding RenderDriverOptions}" SelectedItem="{Binding RenderDriver}"
                                                   AutomationProperties.Name="渲染后端" HorizontalAlignment="Right" Width="166"/>
                                     </DockPanel>
@@ -544,7 +552,7 @@
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                     <TextBlock Text="投屏状态" Style="{StaticResource CenterSectionTitle}"/>
                                     <views:HelpTip Text="渲染 FPS 是 scrcpy 每秒渲染的帧数，画面静止时数值偏低属正常；累计跳过帧是电脑端待显示帧被后续帧覆盖的次数。"
-                                                   AutomationProperties.Name="投屏状态说明" Margin="2,0,0,0"/>
+                                                   AutomationProperties.Name="投屏状态说明"/>
                                 </StackPanel>
                                 <UniformGrid Columns="4" Margin="0,0,0,10">
                                     <StackPanel Margin="0,0,8,0">
@@ -718,7 +726,7 @@
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="显示方式" Style="{StaticResource CenterSectionTitle}"/>
                                             <views:HelpTip Text="原始窗口只调整透明度和置顶；悬停显示在鼠标移入时显示原窗口；始终显示图片用所选图片覆盖窗口；图片 · 悬停显示原窗口平时显示图片，鼠标移入时临时显示原窗口。"
-                                                           AutomationProperties.Name="应用窗口显示方式说明" Margin="2,0,0,0"/>
+                                                           AutomationProperties.Name="应用窗口显示方式说明"/>
                                         </StackPanel>
                                         <ComboBox Margin="0,10,0,0" Style="{StaticResource CenterFieldCombo}"
                                                   ItemsSource="{Binding Apps.DisplayModeOptions}" DisplayMemberPath="DisplayName" SelectedValuePath="Key"
@@ -742,7 +750,7 @@
                                         <DockPanel Margin="0,10,0,0">
                                             <TextBlock Text="图片填充" VerticalAlignment="Center"/>
                                             <views:HelpTip Text="适应保持完整图片并留边；填满保持完整图片并裁掉超出部分；拉伸会改变图片比例；原始大小不缩放。"
-                                                           AutomationProperties.Name="图片填充说明" Margin="2,0,0,0"/>
+                                                           AutomationProperties.Name="图片填充说明"/>
                                             <ComboBox Width="150" HorizontalAlignment="Right" Style="{StaticResource CenterFieldCombo}"
                                                       ItemsSource="{Binding Apps.ImageStretchOptions}" SelectedItem="{Binding Apps.ImageStretch, Mode=TwoWay}"
                                                       IsEnabled="{Binding Apps.IsManageEnabled}" AutomationProperties.Name="图片填充方式"/>
@@ -808,7 +816,7 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="配对地址"/>
                             <views:HelpTip Text="填写手机配对窗口显示的 IP:端口。配对端口和无线调试主页的端口不是同一个。"
-                                           AutomationProperties.Name="配对地址说明" Margin="2,0,0,0"/>
+                                           AutomationProperties.Name="配对地址说明"/>
                         </StackPanel>
                         <TextBox x:Name="PairAddressBox" AutomationProperties.Name="配对地址" MinHeight="36"/>
                         <TextBlock Text="配对码" Margin="0,10,0,4"/>
