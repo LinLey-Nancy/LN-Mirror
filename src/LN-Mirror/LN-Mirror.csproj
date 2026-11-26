@@ -12,7 +12,7 @@
     <RootNamespace>LNMirror</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Product>LN-Mirror</Product>
-    <AssemblyTitle>LN-Mirror 手机悬浮投屏</AssemblyTitle>
+    <AssemblyTitle>LN-Mirror</AssemblyTitle>
     <Version>1.2.0</Version>
     <AssemblyVersion>1.2.0.0</AssemblyVersion>
     <FileVersion>1.2.0.0</FileVersion>

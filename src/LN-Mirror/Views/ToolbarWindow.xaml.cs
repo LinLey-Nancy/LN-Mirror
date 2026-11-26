@@ -1,9 +1,13 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
+using WpfComboBox = System.Windows.Controls.ComboBox;
+using WpfTextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 using LNMirror.Core;
 using LNMirror.Core.Diagnostics;
 using LNMirror.Core.Interop;
@@ -122,11 +126,9 @@ public partial class ToolbarWindow : Window
 
         _followModeKnown = true;
         _lastFollowMode = follows;
-        string hint = follows
-            ? "按住这里可以整体移动（工具条与画面一起）"
-            : "按住这里可以移动工具条";
-        DragHandle.ToolTip = hint;
-        ConnectionTag.ToolTip = hint;
+        DragHelp.Text = follows
+            ? "按住工具条的空白处拖动，工具条与画面会一起移动。"
+            : "按住工具条的空白处拖动只会移动工具条，画面留在原地。";
     }
 
     /// <summary>工具条第一次出现时的落位：跟随画面就贴着画面，不跟随就用上次自己拖的位置。</summary>
@@ -167,14 +169,16 @@ public partial class ToolbarWindow : Window
         double width = ActualWidth;
         double height = ActualHeight;
 
-        var work = GetWorkArea(rect.Value, sx, sy);
+        var pictureWork = GetWorkArea(rect.Value, sx, sy);
 
         double x = (left + right) / 2 - width / 2;
         double y = top - height + CardInset;
 
-        if (y < work.Top) y = bottom - CardInset;
+        if (y < pictureWork.Top) y = bottom - CardInset;
 
-        // 保证工具条完整落在工作区里
+        // 多显示器下不能按画面中心那块屏裁剪，否则工具条会被卡在交界线。
+        // 用所有显示器工作区的并集，只防止工具条跑到整个桌面之外。
+        var work = GetVirtualWorkArea(sx, sy);
         if (work.Width > width) x = Math.Max(work.Left, Math.Min(x, work.Right - width));
         else x = work.Left;
 
@@ -183,6 +187,19 @@ public partial class ToolbarWindow : Window
 
         Left = x;
         Top = y;
+    }
+
+    /// <summary>所有显示器工作区的并集（换算成 DIP），用于允许工具条跨越显示器边界。</summary>
+    private static Rect GetVirtualWorkArea(double sx, double sy)
+    {
+        var screens = System.Windows.Forms.Screen.AllScreens;
+        if (screens.Length == 0) return SystemParameters.WorkArea;
+
+        int left = screens.Min(screen => screen.WorkingArea.Left);
+        int top = screens.Min(screen => screen.WorkingArea.Top);
+        int right = screens.Max(screen => screen.WorkingArea.Right);
+        int bottom = screens.Max(screen => screen.WorkingArea.Bottom);
+        return new Rect(left / sx, top / sy, (right - left) / sx, (bottom - top) / sy);
     }
 
     /// <summary>把工具条拉回可见范围，防止拖到屏幕外找不回来。</summary>
@@ -229,7 +246,9 @@ public partial class ToolbarWindow : Window
 
     private (double X, double Y) GetScale()
     {
-        var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice
+        // TransformToDevice 才是“每 DIP 多少物理像素”（150% 时为 1.5）；
+        // TransformFromDevice 是它的倒数，用它算会把位置放大/缩小。
+        var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice
                         ?? Matrix.Identity;
         double sx = transform.M11 == 0 ? 1 : transform.M11;
         double sy = transform.M22 == 0 ? 1 : transform.M22;
@@ -270,9 +289,19 @@ public partial class ToolbarWindow : Window
     private void OnHideClick(object sender, RoutedEventArgs e) => HideToolbar();
 
     /// <summary>
-    /// 拖动把手：跟随画面时工具条与画面整体一起移动；不跟随时只移动工具条，画面留在原地。
+    /// 点击工具条空白处拖动：跟随画面时工具条与画面整体移动；
+    /// 不跟随时只移动工具条，画面留在原地。按钮、滑块、输入框和问号等操作区域不触发拖动。
     /// </summary>
-    private void OnDragAreaMouseDown(object sender, MouseButtonEventArgs e)
+    private void OnToolbarPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || e.ButtonState != MouseButtonState.Pressed) return;
+        if (IsInteractive(e.OriginalSource as DependencyObject)) return;
+
+        e.Handled = true;
+        DragToolbar();
+    }
+
+    private void DragToolbar()
     {
         bool follows = _controller.Settings.ToolbarFollowsMirror;
         var rect = follows ? _controller.Window.GetRect() : null;
@@ -307,5 +336,17 @@ public partial class ToolbarWindow : Window
 
         // 不跟随时工具条自己走，画面留在原地，位置记下来下次还用
         _controller.SaveToolbarPlacement((int)Left, (int)Top);
+    }
+
+    private static bool IsInteractive(DependencyObject? source)
+    {
+        var current = source;
+        while (current is not null)
+        {
+            if (current is WpfButtonBase or Slider or WpfTextBoxBase or WpfComboBox or HelpTip) return true;
+            current = current is Visual ? VisualTreeHelper.GetParent(current) : null;
+        }
+
+        return false;
     }
 }

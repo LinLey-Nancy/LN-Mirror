@@ -14,7 +14,7 @@
 
     <!--
       画面上方的覆盖层，三件事：
-      1. 画面可见且鼠标移上去时，在四周显示拖动/缩放把手；
+      1. 画面可见且鼠标移上去时，在四条边中段和四个角显示拖动/缩放把手；
       2. 画面完全看不见时，按用户选择画一个位置提示（淡边框或角标）；
       3. 中间区域不渲染内容，点击直接穿透到 scrcpy。
       提示元素一律 IsHitTestVisible=False，不挡画面与下层窗口的点击。
@@ -51,6 +51,10 @@
                 <Style TargetType="Border">
                     <Setter Property="Opacity" Value="0.35"/>
                     <Setter Property="ForceCursor" Value="True"/>
+                    <!-- 分层窗口由 Windows 按像素 alpha 命中：alpha=0 会直接穿到 scrcpy，
+                         所以这里必须用非零 alpha 的近乎全透明黑，而不是 Transparent。
+                         只有允许拖动的段有背景，其余区域仍可点穿到手机画面。 -->
+                    <Setter Property="Background" Value="#10000000"/>
                 </Style>
             </Grid.Resources>
             <Grid.RowDefinitions>
@@ -64,58 +68,86 @@
                 <ColumnDefinition Width="14"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 顶边 / 底边：拖动移动 -->
-            <Border Grid.Row="0" Grid.Column="1" Tag="Move" Cursor="SizeAll"
-                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" MouseLeftButtonUp="OnHandleUp"
-                    MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
-                <Rectangle Height="5" Fill="#73000000" RadiusX="2" RadiusY="2"/>
-            </Border>
-            <Border Grid.Row="2" Grid.Column="1" Tag="Move" Cursor="SizeAll"
-                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" MouseLeftButtonUp="OnHandleUp"
-                    MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
-                <Rectangle Height="5" Fill="#73000000" RadiusX="2" RadiusY="2"/>
-            </Border>
+            <!-- 顶边 / 底边：只保留水平中间三分之一 -->
+            <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="TopMoveHandle" Grid.Column="1" Tag="Move" Cursor="SizeAll"
+                        MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" LostMouseCapture="OnHandleLostCapture"
+                        MouseLeftButtonUp="OnHandleUp" MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
+                    <Rectangle Height="5" Fill="#73000000" RadiusX="2" RadiusY="2" VerticalAlignment="Center"/>
+                </Border>
+            </Grid>
+            <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="BottomMoveHandle" Grid.Column="1" Tag="Move" Cursor="SizeAll"
+                        MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" LostMouseCapture="OnHandleLostCapture"
+                        MouseLeftButtonUp="OnHandleUp" MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
+                    <Rectangle Height="5" Fill="#73000000" RadiusX="2" RadiusY="2" VerticalAlignment="Center"/>
+                </Border>
+            </Grid>
 
-            <!-- 左边 / 右边：拖动移动 -->
-            <Border Grid.Row="1" Grid.Column="0" Tag="Move" Cursor="SizeAll"
-                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" MouseLeftButtonUp="OnHandleUp"
-                    MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
-                <Rectangle Width="5" Fill="#73000000" RadiusX="2" RadiusY="2"/>
-            </Border>
-            <Border Grid.Row="1" Grid.Column="2" Tag="Move" Cursor="SizeAll"
-                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" MouseLeftButtonUp="OnHandleUp"
-                    MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
-                <Rectangle Width="5" Fill="#73000000" RadiusX="2" RadiusY="2"/>
-            </Border>
+            <!-- 左边 / 右边：只保留垂直中间三分之一 -->
+            <Grid Grid.Row="0" Grid.RowSpan="3" Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Border x:Name="LeftMoveHandle" Grid.Row="1" Tag="Move" Cursor="SizeAll"
+                        MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" LostMouseCapture="OnHandleLostCapture"
+                        MouseLeftButtonUp="OnHandleUp" MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
+                    <Rectangle Width="5" Fill="#73000000" RadiusX="2" RadiusY="2" HorizontalAlignment="Center"/>
+                </Border>
+            </Grid>
+            <Grid Grid.Row="0" Grid.RowSpan="3" Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Border x:Name="RightMoveHandle" Grid.Row="1" Tag="Move" Cursor="SizeAll"
+                        MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" LostMouseCapture="OnHandleLostCapture"
+                        MouseLeftButtonUp="OnHandleUp" MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
+                    <Rectangle Width="5" Fill="#73000000" RadiusX="2" RadiusY="2" HorizontalAlignment="Center"/>
+                </Border>
+            </Grid>
 
-            <!-- 四角：拖动缩放 -->
-            <Border Grid.Row="0" Grid.Column="0" Tag="NW" Cursor="SizeNWSE"
-                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" MouseLeftButtonUp="OnHandleUp"
-                    MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
+            <!-- 四角：拖动缩放。放在最后，保证 14×14 的角部命中优先于四边。 -->
+            <Border x:Name="CornerNW" Grid.Row="0" Grid.Column="0" Tag="NW" Cursor="SizeNWSE"
+                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" LostMouseCapture="OnHandleLostCapture"
+                    MouseLeftButtonUp="OnHandleUp" MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
                 <Grid>
                     <Rectangle Height="5" Fill="#73000000" RadiusX="2" RadiusY="2" VerticalAlignment="Top"/>
                     <Rectangle Width="5" Fill="#73000000" RadiusX="2" RadiusY="2" HorizontalAlignment="Left"/>
                 </Grid>
             </Border>
-            <Border Grid.Row="0" Grid.Column="2" Tag="NE" Cursor="SizeNESW"
-                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" MouseLeftButtonUp="OnHandleUp"
-                    MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
+            <Border x:Name="CornerNE" Grid.Row="0" Grid.Column="2" Tag="NE" Cursor="SizeNESW"
+                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" LostMouseCapture="OnHandleLostCapture"
+                    MouseLeftButtonUp="OnHandleUp" MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
                 <Grid>
                     <Rectangle Height="5" Fill="#73000000" RadiusX="2" RadiusY="2" VerticalAlignment="Top"/>
                     <Rectangle Width="5" Fill="#73000000" RadiusX="2" RadiusY="2" HorizontalAlignment="Right"/>
                 </Grid>
             </Border>
-            <Border Grid.Row="2" Grid.Column="0" Tag="SW" Cursor="SizeNESW"
-                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" MouseLeftButtonUp="OnHandleUp"
-                    MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
+            <Border x:Name="CornerSW" Grid.Row="2" Grid.Column="0" Tag="SW" Cursor="SizeNESW"
+                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" LostMouseCapture="OnHandleLostCapture"
+                    MouseLeftButtonUp="OnHandleUp" MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
                 <Grid>
                     <Rectangle Height="5" Fill="#73000000" RadiusX="2" RadiusY="2" VerticalAlignment="Bottom"/>
                     <Rectangle Width="5" Fill="#73000000" RadiusX="2" RadiusY="2" HorizontalAlignment="Left"/>
                 </Grid>
             </Border>
-            <Border Grid.Row="2" Grid.Column="2" Tag="SE" Cursor="SizeNWSE"
-                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" MouseLeftButtonUp="OnHandleUp"
-                    MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
+            <Border x:Name="CornerSE" Grid.Row="2" Grid.Column="2" Tag="SE" Cursor="SizeNWSE"
+                    MouseLeftButtonDown="OnHandleDown" MouseMove="OnHandleMove" LostMouseCapture="OnHandleLostCapture"
+                    MouseLeftButtonUp="OnHandleUp" MouseEnter="OnHandleEnter" MouseLeave="OnHandleLeave">
                 <Grid>
                     <Rectangle Height="5" Fill="#73000000" RadiusX="2" RadiusY="2" VerticalAlignment="Bottom"/>
                     <Rectangle Width="5" Fill="#73000000" RadiusX="2" RadiusY="2" HorizontalAlignment="Right"/>

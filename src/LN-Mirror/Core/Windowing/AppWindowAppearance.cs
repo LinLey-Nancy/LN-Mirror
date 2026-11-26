@@ -29,7 +29,7 @@ public readonly record struct AppWindowVisualState(
 
 public static class AppWindowAppearance
 {
-    public static AppWindowVisualState Resolve(string? mode, int opacity, bool pointerInside)
+    public static AppWindowVisualState Resolve(string? mode, int opacity, bool hoverShown)
     {
         mode = AppWindowDisplayModes.Normalize(mode);
         opacity = Math.Clamp(opacity, 0, 100);
@@ -37,11 +37,11 @@ public static class AppWindowAppearance
         return mode switch
         {
             AppWindowDisplayModes.HoverReveal => new(
-                pointerInside ? opacity : 0,
-                !pointerInside || opacity == 0,
+                hoverShown ? opacity : 0,
+                !hoverShown || opacity == 0,
                 false),
             AppWindowDisplayModes.Image => new(100, false, true),
-            AppWindowDisplayModes.ImageHoverReveal when pointerInside => new(opacity, false, false),
+            AppWindowDisplayModes.ImageHoverReveal when hoverShown => new(opacity, false, false),
             AppWindowDisplayModes.ImageHoverReveal => new(100, false, true),
             _ => new(opacity, opacity == 0, false),
         };

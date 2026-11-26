@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:config="clr-namespace:LNMirror.Core.Configuration"
+        xmlns:views="clr-namespace:LNMirror.Views"
         Title="LN-Mirror"
         Width="1092.5" Height="732.5" MinWidth="840" MinHeight="530"
         Icon="/LN-Mirror;component/Assets/app.png"
@@ -90,7 +91,7 @@
                                     </Grid.RowDefinitions>
                                     <StackPanel>
                                         <DockPanel MinHeight="31" Margin="0,0,0,4">
-                                            <Button DockPanel.Dock="Right" Content="↻" AutomationProperties.Name="刷新无线设备" ToolTip="刷新无线设备"
+                                            <Button DockPanel.Dock="Right" Content="↻" AutomationProperties.Name="刷新无线设备"
                                                     FontSize="18" MinHeight="31" Padding="8,0" Style="{StaticResource CenterAction}"
                                                     Visibility="{Binding IsLanMode, Converter={StaticResource BoolToVis}}" Click="OnRefreshLanClick"/>
                                             <TextBlock Text="设备列表" Style="{StaticResource CenterSectionTitle}" VerticalAlignment="Center" MinHeight="24"/>
@@ -101,7 +102,7 @@
                                                 <RadioButton Content="USB 有线" GroupName="ConnectionMode" Style="{StaticResource CenterMode}" IsChecked="{Binding IsUsbMode}"/>
                                             </StackPanel>
                                         </Border>
-                                        <ListBox x:Name="DeviceList" ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}"
+                                        <ListBox x:Name="DeviceList" ItemsSource="{Binding VisibleDevices}" SelectedItem="{Binding SelectedDevice}"
                                                  AutomationProperties.Name="已识别的设备" ItemContainerStyle="{StaticResource CenterDeviceRow}"
                                                  BorderThickness="0" Padding="0" MaxHeight="155" Margin="0,0,0,8"
                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -128,7 +129,7 @@
                                                                 </Style>
                                                             </TextBlock.Style>
                                                         </TextBlock>
-                                                        <TextBlock Text="{Binding StateDescription}" Style="{StaticResource CenterNote}" Margin="0,2,0,0"/>
+                                                        <TextBlock Text="{Binding TransportStateDescription}" Style="{StaticResource CenterNote}" Margin="0,2,0,0"/>
                                                     </StackPanel>
                                                 </DataTemplate>
                                             </ListBox.ItemTemplate>
@@ -200,7 +201,11 @@
                                         <StackPanel Visibility="{Binding IsLanMode, Converter={StaticResource BoolToVis}}">
                                             <Expander x:Name="OtherConnections" Header="其他连接选项" Style="{StaticResource CenterDisclosure}" Margin="0,8,0,0">
                                                 <StackPanel Margin="0,8,0,0">
-                                                    <TextBlock Text="手动连接" FontWeight="SemiBold"/>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="手动连接" FontWeight="SemiBold"/>
+                                                        <views:HelpTip Text="填写手机「无线调试」主页显示的 IP 和端口，不是配对窗口里的端口。"
+                                                                       AutomationProperties.Name="手动连接地址说明" Margin="2,0,0,0"/>
+                                                    </StackPanel>
                                                     <TextBlock Text="填写「无线调试」主页的 IP 和端口。" Style="{StaticResource CenterNote}" Margin="0,3,0,5"/>
                                                     <DockPanel>
                                                         <Button DockPanel.Dock="Right" Content="连接" Style="{StaticResource CenterOutline}"
@@ -236,12 +241,16 @@
                                                             </DataTemplate>
                                                         </ItemsControl.ItemTemplate>
                                                     </ItemsControl>
-                                                    <TextBlock Text="USB 转无线" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,4">
+                                                        <TextBlock Text="USB 转无线" FontWeight="SemiBold"/>
+                                                        <views:HelpTip Text="填写手机 IP，默认端口 5555。仅用于可信局域网；手机需先用数据线连接并授权。"
+                                                                       AutomationProperties.Name="USB 转无线说明" Margin="2,0,0,0"/>
+                                                    </StackPanel>
                                                     <TextBlock Text="仅用于可信局域网。请先用数据线连接手机并允许 USB 调试。" Style="{StaticResource CenterNote}" Margin="0,0,0,5"/>
                                                     <DockPanel>
                                                         <Button DockPanel.Dock="Right" Content="切换并连接" Style="{StaticResource CenterOutline}"
                                                                 Click="OnUsbSwitchLanClick" Margin="6,0,0,0"/>
-                                                        <TextBox x:Name="UsbSwitchAddressBox" AutomationProperties.Name="手机 IP" ToolTip="填写手机 IP，默认端口 5555"/>
+                                                        <TextBox x:Name="UsbSwitchAddressBox" AutomationProperties.Name="手机 IP"/>
                                                     </DockPanel>
                                                 </StackPanel>
                                             </Expander>
@@ -310,13 +319,23 @@
                                     <TextBlock x:Name="PreviewState" Style="{StaticResource CenterNote}" Margin="0,0,0,8"/>
                                     <Border BorderBrush="{StaticResource CenterLine}" BorderThickness="0,1,0,0" Padding="0,8,0,0">
                                         <DockPanel LastChildFill="False">
-                                            <ToggleButton DockPanel.Dock="Left" Content="鼠标穿透" IsChecked="{Binding PassThrough, Mode=TwoWay}"
-                                                          IsEnabled="{Binding PassThroughEnabled}" Style="{StaticResource CenterQuickToggle}"
-                                                          ToolTip="开启后，点击落到画面下方的窗口" Margin="0,0,4,0"/>
-                                            <ToggleButton DockPanel.Dock="Left" Content="置顶" IsChecked="{Binding Topmost, Mode=TwoWay}"
-                                                          Style="{StaticResource CenterQuickToggle}"/>
-                                            <Button DockPanel.Dock="Right" Content="找回画面" Style="{StaticResource CenterAction}" Click="OnRestoreClick" IsEnabled="{Binding IsConnected}"
-                                                    ToolTip="恢复 100% 不透明度、关闭穿透并找回窗口"/>
+                                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="0,0,14,0">
+                                                <ToggleButton Content="鼠标穿透" IsChecked="{Binding PassThrough, Mode=TwoWay}"
+                                                              IsEnabled="{Binding PassThroughEnabled}" Style="{StaticResource CenterQuickToggle}"/>
+                                                <views:HelpTip Text="开启后，点击会穿过画面落到下方窗口，手机不接收这次点击。画面完全透明时也会自动不接收点击。"
+                                                               AutomationProperties.Name="鼠标穿透说明" Margin="2,0,0,0"/>
+                                            </StackPanel>
+                                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                                                <ToggleButton Content="{Binding TopmostButtonText}" IsChecked="{Binding Topmost, Mode=TwoWay}"
+                                                              Style="{StaticResource CenterQuickToggle}"/>
+                                                <views:HelpTip Text="让画面始终显示在其他窗口之上。画面不置顶时位置提示不会出现；鼠标落在画面可见部分上时，拖动把手仍会出现。"
+                                                               AutomationProperties.Name="置顶说明" Margin="2,0,0,0"/>
+                                            </StackPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                                <views:HelpTip Text="恢复 100% 不透明度、关闭鼠标穿透，并把画面移回可见显示器。"
+                                                               AutomationProperties.Name="找回画面说明" Margin="0,0,2,0"/>
+                                                <Button Content="找回画面" Style="{StaticResource CenterAction}" Click="OnRestoreClick" IsEnabled="{Binding IsConnected}"/>
+                                            </StackPanel>
                                         </DockPanel>
                                     </Border>
                                     <Button Content="显示工具条" Style="{StaticResource CenterAction}" Click="OnShowToolbarClick"
@@ -329,64 +348,114 @@
                             <StackPanel>
                                 <TextBlock Text="悬浮窗口" Style="{StaticResource CenterSectionTitle}" Margin="0,0,0,5"/>
                                 <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="24"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <CheckBox Content="鼠标悬停时显示画面" IsChecked="{Binding HoverRevealEnabled}" Style="{StaticResource CenterSettingCheck}"
-                                                  ToolTip="鼠标移出时隐藏画面，移入时按设定的不透明度显示"/>
-                                        <DockPanel Visibility="{Binding HoverRevealEnabled, Converter={StaticResource BoolToVis}}" Margin="0,5">
-                                            <TextBlock Text="悬停显示延迟" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <Grid HorizontalAlignment="Right">
-                                                <ToggleButton x:Name="HoverDelayToggle" Width="142" Style="{StaticResource CenterFieldToggle}"
-                                                              AutomationProperties.Name="悬停显示延迟" Content="{Binding HoverDelayLabel}"/>
-                                                <Popup x:Name="HoverDelayPopup" PlacementTarget="{Binding ElementName=HoverDelayToggle}"
-                                                       Placement="Bottom" StaysOpen="False" AllowsTransparency="True" VerticalOffset="4"
-                                                       IsOpen="{Binding IsChecked, ElementName=HoverDelayToggle, Mode=TwoWay}"
-                                                       Opened="OnHoverDelayPopupOpened" Closed="OnHoverDelayPopupClosed">
-                                                    <Border MinWidth="142" Style="{StaticResource CenterFieldMenu}">
-                                                        <StackPanel PreviewKeyDown="OnHoverDelayPopupKeyDown" KeyboardNavigation.TabNavigation="Cycle">
-                                                            <StackPanel.Resources>
-                                                                <Style TargetType="Button" BasedOn="{StaticResource CenterFieldMenuButton}"/>
-                                                            </StackPanel.Resources>
-                                                            <Button x:Name="HoverDelayOff" Content="关闭" Tag="{x:Static config:HoverDelayModes.Off}"
-                                                                    Click="OnHoverDelayPresetClick" ToolTip="鼠标移入时立即显示"/>
-                                                            <Button Content="智能" Tag="{x:Static config:HoverDelayModes.Smart}"
-                                                                    Click="OnHoverDelayPresetClick" ToolTip="鼠标停稳约 350 毫秒后显示"/>
-                                                            <Button Content="1 s" Tag="{x:Static config:HoverDelayModes.OneSecond}" Click="OnHoverDelayPresetClick"/>
-                                                            <Button Content="2 s" Tag="{x:Static config:HoverDelayModes.TwoSeconds}" Click="OnHoverDelayPresetClick"/>
-                                                            <Button x:Name="HoverDelayCustom" Content="自定义" Click="OnHoverDelayCustomClick"/>
-                                                            <Grid x:Name="HoverDelayEditor" Margin="3" Visibility="Collapsed">
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="*"/>
-                                                                    <ColumnDefinition Width="Auto"/>
-                                                                </Grid.ColumnDefinitions>
-                                                                <TextBox x:Name="HoverDelayInput" Style="{StaticResource CenterFieldText}"
-                                                                         AutomationProperties.Name="自定义悬停延迟（秒）"
-                                                                         ToolTip="0.1–60 秒，可输入小数。按回车或点击菜单外保存。"/>
-                                                                <TextBlock Text="秒" Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center"/>
-                                                            </Grid>
-                                                            <TextBlock x:Name="HoverDelayError" Text="请输入 0.1–60 秒" Style="{StaticResource CenterNote}"
-                                                                       Margin="3" Visibility="Collapsed"/>
-                                                        </StackPanel>
-                                                    </Border>
-                                                </Popup>
-                                            </Grid>
-                                        </DockPanel>
-                                        <DockPanel Visibility="{Binding HoverRevealEnabled, Converter={StaticResource BoolToVis}}" Margin="0,5">
-                                            <TextBlock Text="隐藏时的位置提示" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <ComboBox Style="{StaticResource CenterFieldCombo}" ItemsSource="{Binding HoverRevealHintOptions}" DisplayMemberPath="DisplayName"
-                                                      AutomationProperties.Name="隐藏时的位置提示" SelectedValuePath="Key"
-                                                      SelectedValue="{Binding HoverRevealHint}" HorizontalAlignment="Right" Width="142"/>
-                                        </DockPanel>
-                                        <CheckBox Content="悬停显示拖动把手" IsChecked="{Binding HoverFrameEnabled}" Style="{StaticResource CenterSettingCheck}"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <CheckBox Content="无边框" IsChecked="{Binding Borderless}" Style="{StaticResource CenterSettingCheck}"/>
-                                        <CheckBox Content="工具条跟随画面" IsChecked="{Binding ToolbarFollowsMirror}" Style="{StaticResource CenterSettingCheck}"/>
-                                    </StackPanel>
+                                    <!-- 左侧悬停设置，右侧窗口外观设置 -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <CheckBox IsChecked="{Binding HoverRevealEnabled}" Style="{StaticResource CenterSettingCheck}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="鼠标悬停时显示画面" VerticalAlignment="Center"/>
+                                                    <views:HelpTip Text="画面平时完全透明，鼠标移入后按设定的不透明度显示，移出后隐藏。关闭悬停模式不会改变鼠标穿透设置。"
+                                                                   AutomationProperties.Name="鼠标悬停时显示画面说明"/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                            <StackPanel Margin="18,0,0,0">
+                                                <StackPanel.Style>
+                                                    <Style TargetType="StackPanel">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HoverRevealEnabled}" Value="False">
+                                                                <Setter Property="Opacity" Value="0.55"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </StackPanel.Style>
+                                                <DockPanel Margin="0,5">
+                                                    <TextBlock Text="悬停显示延迟" VerticalAlignment="Center"/>
+                                                <views:HelpTip Text="「关闭」在鼠标移入后立即显示；「智能」在指针停稳约 350 毫秒后显示；也可以选 1 秒、2 秒或自定义 0.1–60 秒。"
+                                                               AutomationProperties.Name="悬停显示延迟说明"/>
+                                                <Grid HorizontalAlignment="Right">
+                                                    <ToggleButton x:Name="HoverDelayToggle" Width="142" Style="{StaticResource CenterFieldToggle}"
+                                                                  AutomationProperties.Name="悬停显示延迟" Content="{Binding HoverDelayLabel}"
+                                                                  IsEnabled="{Binding HoverRevealEnabled}"/>
+                                                    <Popup x:Name="HoverDelayPopup" PlacementTarget="{Binding ElementName=HoverDelayToggle}"
+                                                           Placement="Bottom" StaysOpen="False" AllowsTransparency="True" VerticalOffset="4"
+                                                           IsOpen="{Binding IsChecked, ElementName=HoverDelayToggle, Mode=TwoWay}"
+                                                           Opened="OnHoverDelayPopupOpened" Closed="OnHoverDelayPopupClosed">
+                                                        <Border MinWidth="142" Style="{StaticResource CenterFieldMenu}">
+                                                            <StackPanel PreviewKeyDown="OnHoverDelayPopupKeyDown" KeyboardNavigation.TabNavigation="Cycle">
+                                                                <StackPanel.Resources>
+                                                                    <Style TargetType="Button" BasedOn="{StaticResource CenterFieldMenuButton}"/>
+                                                                </StackPanel.Resources>
+                                                                <Button x:Name="HoverDelayOff" Content="关闭" Tag="{x:Static config:HoverDelayModes.Off}"
+                                                                        Click="OnHoverDelayPresetClick"/>
+                                                                <Button Content="智能" Tag="{x:Static config:HoverDelayModes.Smart}"
+                                                                        Click="OnHoverDelayPresetClick"/>
+                                                                <Button Content="1 s" Tag="{x:Static config:HoverDelayModes.OneSecond}" Click="OnHoverDelayPresetClick"/>
+                                                                <Button Content="2 s" Tag="{x:Static config:HoverDelayModes.TwoSeconds}" Click="OnHoverDelayPresetClick"/>
+                                                                <Button x:Name="HoverDelayCustom" Content="自定义" Click="OnHoverDelayCustomClick"/>
+                                                                <Grid x:Name="HoverDelayEditor" Margin="3" Visibility="Collapsed">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="*"/>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBox x:Name="HoverDelayInput" Style="{StaticResource CenterFieldText}"
+                                                                             AutomationProperties.Name="自定义悬停延迟（秒）"/>
+                                                                    <TextBlock Text="秒" Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                                                </Grid>
+                                                                <TextBlock x:Name="HoverDelayError" Text="请输入 0.1–60 秒" Style="{StaticResource CenterNote}"
+                                                                           Margin="3" Visibility="Collapsed"/>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </Popup>
+                                                </Grid>
+                                            </DockPanel>
+                                            <DockPanel Margin="0,5">
+                                                <TextBlock Text="隐藏时的位置提示" VerticalAlignment="Center"/>
+                                                <views:HelpTip Text="画面完全看不见时，在原来的位置显示淡边框或角标；选「不提示」则不显示任何标记。"
+                                                               AutomationProperties.Name="隐藏时的位置提示说明"/>
+                                                <ComboBox Style="{StaticResource CenterFieldCombo}" ItemsSource="{Binding HoverRevealHintOptions}" DisplayMemberPath="DisplayName"
+                                                          AutomationProperties.Name="隐藏时的位置提示" SelectedValuePath="Key"
+                                                          SelectedValue="{Binding HoverRevealHint}" HorizontalAlignment="Right" Width="142"
+                                                          IsEnabled="{Binding HoverRevealEnabled}"/>
+                                            </DockPanel>
+                                            <CheckBox IsChecked="{Binding HoverRevealKeepOnLeave}" IsEnabled="{Binding HoverRevealEnabled}"
+                                                      Style="{StaticResource CenterSettingCheck}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="移开仍显示" VerticalAlignment="Center"/>
+                                                    <views:HelpTip Text="当设置为“悬浮时显示”时，当鼠标移开界面仍保留显示，直到鼠标进行任意点击操作时才关闭。"
+                                                                   AutomationProperties.Name="移开仍显示说明"/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <CheckBox IsChecked="{Binding Borderless}" Style="{StaticResource CenterSettingCheck}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="无边框" VerticalAlignment="Center"/>
+                                                    <views:HelpTip Text="只影响手机悬浮画面：去掉它的系统标题栏和边框，主窗口不受影响。移动和缩放改用鼠标停在画面上时出现的把手。"
+                                                                   AutomationProperties.Name="无边框说明"/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                            <CheckBox IsChecked="{Binding ToolbarFollowsMirror}" Style="{StaticResource CenterSettingCheck}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="工具条跟随画面" VerticalAlignment="Center"/>
+                                                    <views:HelpTip Text="勾选后工具条紧贴画面，移动画面时一起移动；不勾选时两者各自移动，工具条位置会被记住。"
+                                                                   AutomationProperties.Name="工具条跟随画面说明"/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                            <CheckBox IsChecked="{Binding HoverFrameEnabled}" Style="{StaticResource CenterSettingCheck}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="悬停显示拖动把手" VerticalAlignment="Center"/>
+                                                    <views:HelpTip Text="鼠标在画面上停稳约 0.4 秒后显示把手。四条边的中段用于移动窗口，四个角用于按比例缩放。"
+                                                                   AutomationProperties.Name="悬停显示拖动把手说明"/>
+                                                </StackPanel>
+                                            </CheckBox>
+                                        </StackPanel>
+                                    </Grid>
                                 </Grid>
                             </StackPanel>
                         </Border>
@@ -413,15 +482,22 @@
                                         <TextBlock Text="{Binding QualitySummary}" Style="{StaticResource CenterNote}" Margin="0,3,0,0"/>
                                     </StackPanel>
                                 </DockPanel>
-                                <DockPanel Margin="0,10,0,0" ToolTip="0 ms 优先响应。增加缓冲可减少短时抖动，画面反馈也会稍晚。重连后生效。">
+                                <DockPanel Margin="0,10,0,0">
                                     <ComboBox DockPanel.Dock="Right" Width="166" Margin="8,0,0,0" Style="{StaticResource CenterFieldCombo}"
                                               ItemsSource="{Binding WirelessBufferDurations}" SelectedItem="{Binding WirelessVideoBufferMs}"
                                               AutomationProperties.Name="无线画面缓冲（毫秒）"/>
                                     <TextBlock Text="无线画面缓冲（ms）" VerticalAlignment="Center"/>
+                                    <views:HelpTip Text="0 ms 优先响应。增加缓冲可减少短时抖动，画面反馈也会稍晚。重连后生效。"
+                                                   AutomationProperties.Name="无线画面缓冲说明" Margin="2,0,0,0"/>
                                 </DockPanel>
                                 <CheckBox Content="投屏时保持手机常亮（需供电）" IsChecked="{Binding KeepAwake}" Style="{StaticResource CenterSettingCheck}"/>
-                                <CheckBox Content="断线后自动重连" IsChecked="{Binding LanAutoReconnect}" Style="{StaticResource CenterSettingCheck}"
-                                          ToolTip="适用于 USB 和无线连接，含启动时恢复上次无线投屏"/>
+                                <CheckBox IsChecked="{Binding LanAutoReconnect}" Style="{StaticResource CenterSettingCheck}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="断线后自动重连" VerticalAlignment="Center"/>
+                                        <views:HelpTip Text="适用于 USB 和无线连接，包括启动时恢复上次的无线投屏。关掉后断线不会自动重试。"
+                                                       AutomationProperties.Name="断线后自动重连说明"/>
+                                    </StackPanel>
+                                </CheckBox>
                                 <TextBlock Text="画质、无线缓冲、渲染和常亮在连接时生效。" Style="{StaticResource CenterNote}" Margin="0,4,0,0"/>
                                 <Button Content="应用设置并重连" Style="{StaticResource CenterOutline}" Click="OnApplyAndReconnectClick"
                                         HorizontalAlignment="Right" Visibility="{Binding IsConnected, Converter={StaticResource BoolToVis}}"
@@ -445,7 +521,9 @@
                                                  Text="{Binding HotkeyPassThrough, UpdateSourceTrigger=LostFocus}" Tag="passthrough" KeyDown="OnHotKeyBoxKeyDown"/>
                                     </DockPanel>
                                     <DockPanel>
-                                        <TextBlock Text="渲染后端" VerticalAlignment="Center" ToolTip="透明度不生效时可尝试 software 或 opengl"/>
+                                        <TextBlock Text="渲染后端" VerticalAlignment="Center"/>
+                                        <views:HelpTip Text="透明度不生效或画面全黑时，可尝试 software 或 opengl；改完需要「应用设置并重连」。"
+                                                       AutomationProperties.Name="渲染后端说明" Margin="2,0,0,0"/>
                                         <ComboBox Style="{StaticResource CenterFieldCombo}" ItemsSource="{Binding RenderDriverOptions}" SelectedItem="{Binding RenderDriver}"
                                                   AutomationProperties.Name="渲染后端" HorizontalAlignment="Right" Width="166"/>
                                     </DockPanel>
@@ -463,14 +541,17 @@
                         <TextBlock Text="运行诊断" Style="{StaticResource CenterPageTitle}" Margin="0,0,0,18"/>
                         <Border Style="{StaticResource CenterPanel}" Margin="0,0,0,14">
                             <StackPanel>
-                                <TextBlock Text="投屏状态" Style="{StaticResource CenterSectionTitle}" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                    <TextBlock Text="投屏状态" Style="{StaticResource CenterSectionTitle}"/>
+                                    <views:HelpTip Text="渲染 FPS 是 scrcpy 每秒渲染的帧数，画面静止时数值偏低属正常；累计跳过帧是电脑端待显示帧被后续帧覆盖的次数。"
+                                                   AutomationProperties.Name="投屏状态说明" Margin="2,0,0,0"/>
+                                </StackPanel>
                                 <UniformGrid Columns="4" Margin="0,0,0,10">
                                     <StackPanel Margin="0,0,8,0">
-                                        <TextBlock Text="渲染 FPS" Style="{StaticResource CenterNote}" ToolTip="scrcpy 每秒渲染的帧数。手机画面静止时数值通常较低。"/>
+                                        <TextBlock Text="渲染 FPS" Style="{StaticResource CenterNote}"/>
                                         <TextBlock Text="{Binding FpsText}" FontWeight="SemiBold" Margin="0,4,0,0"/>
                                         <TextBlock Text="{Binding SkippedFramesText, StringFormat='累计跳过 {0} 帧'}"
-                                                   Style="{StaticResource CenterNote}" TextWrapping="Wrap"
-                                                   ToolTip="本次会话中，电脑端待显示帧被后续帧覆盖的次数。"/>
+                                                   Style="{StaticResource CenterNote}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <StackPanel Margin="0,0,8,0">
                                         <TextBlock Text="视频尺寸" Style="{StaticResource CenterNote}"/>
@@ -596,7 +677,7 @@
                             <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
                                 <TextBlock Text="当前窗口" Style="{StaticResource CenterPageTitle}" FontSize="20"/>
                                 <Button Content="↻" HorizontalAlignment="Right" Width="36" Style="{StaticResource CenterAction}"
-                                        AutomationProperties.Name="刷新窗口列表" ToolTip="刷新窗口列表" Click="OnRefreshAppWindowsClick"/>
+                                        AutomationProperties.Name="刷新窗口列表" Click="OnRefreshAppWindowsClick"/>
                             </Grid>
                             <Border Background="{StaticResource CenterSoft}" CornerRadius="7" Padding="8,6" DockPanel.Dock="Bottom" Margin="0,10,0,0">
                                 <TextBlock Style="{StaticResource CenterNote}" Text="仅列出普通可见窗口。首版同时管理一个主窗口，不包含独立弹窗。"/>
@@ -634,11 +715,24 @@
 
                                 <Border Style="{StaticResource CenterPanel}" Background="{StaticResource CenterSoft}" Padding="14" Margin="0,14,0,0">
                                     <StackPanel>
-                                        <TextBlock Text="显示方式" Style="{StaticResource CenterSectionTitle}"/>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="显示方式" Style="{StaticResource CenterSectionTitle}"/>
+                                            <views:HelpTip Text="原始窗口只调整透明度和置顶；悬停显示在鼠标移入时显示原窗口；始终显示图片用所选图片覆盖窗口；图片 · 悬停显示原窗口平时显示图片，鼠标移入时临时显示原窗口。"
+                                                           AutomationProperties.Name="应用窗口显示方式说明" Margin="2,0,0,0"/>
+                                        </StackPanel>
                                         <ComboBox Margin="0,10,0,0" Style="{StaticResource CenterFieldCombo}"
                                                   ItemsSource="{Binding Apps.DisplayModeOptions}" DisplayMemberPath="DisplayName" SelectedValuePath="Key"
                                                   SelectedValue="{Binding Apps.DisplayMode, Mode=TwoWay}" IsEnabled="{Binding Apps.IsManageEnabled}"
                                                   AutomationProperties.Name="应用窗口显示方式"/>
+                                        <CheckBox IsChecked="{Binding Apps.KeepOnLeave, Mode=TwoWay}"
+                                                  IsEnabled="{Binding Apps.IsManageEnabled}" Style="{StaticResource CenterSettingCheck}"
+                                                  Visibility="{Binding Apps.UsesHover, Converter={StaticResource BoolToVis}}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="移开仍显示" VerticalAlignment="Center"/>
+                                                <views:HelpTip Text="当设置为“悬浮时显示”时，当鼠标移开界面仍保留显示，直到鼠标进行任意点击操作时才关闭。"
+                                                               AutomationProperties.Name="移开仍显示说明"/>
+                                            </StackPanel>
+                                        </CheckBox>
                                         <DockPanel Margin="0,12,0,0">
                                             <Button DockPanel.Dock="Right" Content="选择图片…" Style="{StaticResource CenterOutline}"
                                                     Click="OnChooseAppImageClick" IsEnabled="{Binding Apps.IsManageEnabled}"/>
@@ -647,6 +741,8 @@
                                         </DockPanel>
                                         <DockPanel Margin="0,10,0,0">
                                             <TextBlock Text="图片填充" VerticalAlignment="Center"/>
+                                            <views:HelpTip Text="适应保持完整图片并留边；填满保持完整图片并裁掉超出部分；拉伸会改变图片比例；原始大小不缩放。"
+                                                           AutomationProperties.Name="图片填充说明" Margin="2,0,0,0"/>
                                             <ComboBox Width="150" HorizontalAlignment="Right" Style="{StaticResource CenterFieldCombo}"
                                                       ItemsSource="{Binding Apps.ImageStretchOptions}" SelectedItem="{Binding Apps.ImageStretch, Mode=TwoWay}"
                                                       IsEnabled="{Binding Apps.IsManageEnabled}" AutomationProperties.Name="图片填充方式"/>
@@ -709,9 +805,12 @@
                     <TextBlock Text="在手机的「无线调试」中打开「使用配对码配对设备」。"
                                Style="{StaticResource CenterNote}" FontSize="14" Margin="0,0,0,12"/>
                     <StackPanel x:Name="PairFields">
-                        <TextBlock Text="配对地址" Margin="0,0,0,4"/>
-                        <TextBox x:Name="PairAddressBox" AutomationProperties.Name="配对地址" MinHeight="36"
-                                 ToolTip="输入配对窗口显示的 IP 和端口"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="配对地址"/>
+                            <views:HelpTip Text="填写手机配对窗口显示的 IP:端口。配对端口和无线调试主页的端口不是同一个。"
+                                           AutomationProperties.Name="配对地址说明" Margin="2,0,0,0"/>
+                        </StackPanel>
+                        <TextBox x:Name="PairAddressBox" AutomationProperties.Name="配对地址" MinHeight="36"/>
                         <TextBlock Text="配对码" Margin="0,10,0,4"/>
                         <TextBox x:Name="PairCodeBox" AutomationProperties.Name="配对码" MinHeight="36"/>
                     </StackPanel>

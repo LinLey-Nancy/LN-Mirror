@@ -171,8 +171,16 @@ public class WindowStyleController : IDisposable
     public bool MoveTo(int x, int y)
     {
         if (!IsValid) return false;
-        return NativeMethods.SetWindowPos(_handle, IntPtr.Zero, x, y, 0, 0,
+        _lastError = 0;
+        bool ok = NativeMethods.SetWindowPos(_handle, IntPtr.Zero, x, y, 0, 0,
             NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+        if (!ok)
+        {
+            CaptureError();
+            AppLog.Warn($"[窗口] 移动失败：句柄 0x{_handle.ToInt64():X}，目标 ({x},{y})，Windows 错误 {_lastError}");
+        }
+
+        return ok;
     }
 
     public bool SetRect(int x, int y, int width, int height)
@@ -180,8 +188,16 @@ public class WindowStyleController : IDisposable
         if (!IsValid) return false;
         width = Math.Max(width, 120);
         height = Math.Max(height, 200);
-        return NativeMethods.SetWindowPos(_handle, IntPtr.Zero, x, y, width, height,
+        _lastError = 0;
+        bool ok = NativeMethods.SetWindowPos(_handle, IntPtr.Zero, x, y, width, height,
             NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+        if (!ok)
+        {
+            CaptureError();
+            AppLog.Warn($"[窗口] 调整大小失败：句柄 0x{_handle.ToInt64():X}，目标 ({x},{y},{width},{height})，Windows 错误 {_lastError}");
+        }
+
+        return ok;
     }
 
     public bool MoveToVisibleArea()

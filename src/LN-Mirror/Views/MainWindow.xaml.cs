@@ -45,7 +45,8 @@ public partial class MainWindow : Window
             ConnectionPhase.Offline => ("设备离线", "ErrBrush"),
             ConnectionPhase.Failed => ("连接失败", "ErrBrush"),
             _ when _controller.IsBusy => ("正在连接", "CenterMuted"),
-            _ when _controller.SelectedDevice?.IsReady == true => ("可连接", "CenterMuted"),
+            _ when _controller.VisibleDevices.Count == 0 => ("未发现设备", "CenterMuted"),
+            _ when _controller.CanConnect && _controller.SelectedDevice?.IsReady == true => ("可连接", "CenterMuted"),
             _ => ("未连接", "CenterMuted"),
         };
 
@@ -237,7 +238,8 @@ public partial class MainWindow : Window
         if (_pairingInProgress) return;
 
         _pairingInProgress = true;
-        PairFields.IsEnabled = PairSubmitButton.IsEnabled = false;
+        // 只禁用输入框和提交按钮：PairFields 里的问号在配对期间仍要能查看。
+        PairAddressBox.IsEnabled = PairCodeBox.IsEnabled = PairSubmitButton.IsEnabled = false;
         PairingMessage.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "CenterMuted");
         PairingMessage.Text = "正在配对并连接…";
         PairingMessage.Visibility = Visibility.Visible;
@@ -248,7 +250,7 @@ public partial class MainWindow : Window
         finally
         {
             PairCodeBox.Clear();
-            PairFields.IsEnabled = PairSubmitButton.IsEnabled = true;
+            PairAddressBox.IsEnabled = PairCodeBox.IsEnabled = PairSubmitButton.IsEnabled = true;
             _pairingInProgress = false;
         }
 
@@ -455,6 +457,7 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName is nameof(AppController.Phase) or nameof(AppController.IsBusy) or nameof(AppController.CanDisconnect)
             or nameof(AppController.IsLanMode) or nameof(AppController.SelectedDevice)
+            or nameof(AppController.VisibleDevices) or nameof(AppController.CanConnect)
             or nameof(AppController.Opacity) or nameof(AppController.EffectiveOpacity)
             or nameof(AppController.OpacityStateText) or nameof(AppController.HoverRevealHint)
             or nameof(AppController.StatusLine))
