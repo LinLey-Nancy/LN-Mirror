@@ -27,6 +27,12 @@ public sealed record AdbDevice(string Serial, string State, string Model, string
 
     public string DisplayName => string.IsNullOrWhiteSpace(Model) ? Serial : $"{Model} · {Serial}";
 
+    /// <summary>界面上的连接方式标签：USB 或无线。</summary>
+    public string TransportLabel => IsWirelessSerial(Serial) ? "无线" : "USB";
+
+    /// <summary>列表第二行：连接方式 + 状态，避免同型号两个端点显示成完全相同的文字。</summary>
+    public string TransportStateDescription => $"{TransportLabel} · {StateDescription}";
+
     /// <summary>给界面用的中文状态说明。unknown/offline/recovery 等状态不静默处理。</summary>
     public string StateDescription => State.ToLowerInvariant() switch
     {

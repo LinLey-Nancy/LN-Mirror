@@ -36,7 +36,7 @@ public sealed class TrayIconService : IDisposable
 
         _icon = new NotifyIcon
         {
-            Text = "LN-Mirror 手机悬浮投屏",
+            Text = "LN-Mirror",
             Icon = LoadIcon(),
             Visible = true,
             ContextMenuStrip = menu,

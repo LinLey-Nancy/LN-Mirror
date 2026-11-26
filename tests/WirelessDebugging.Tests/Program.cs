@@ -3,8 +3,16 @@ using System.IO.Pipes;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
+using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Binding = System.Windows.Data.Binding;
+using Cursors = System.Windows.Input.Cursors;
+using ToolTip = System.Windows.Controls.ToolTip;
+using Point = System.Windows.Point;
 using System.Windows.Threading;
 using LNMirror.Core;
 using LNMirror.Core.Adb;
@@ -23,6 +31,29 @@ const string otherPhone = "adb-other-TnSdi9 _adb-tls-connect._tcp 192.0.2.11:330
 const string sameHostOtherDevice = "adb-other-TnSdi9 _adb-tls-connect._tcp 192.0.2.10:33016";
 const string connectAddress = "192.0.2.10:33015";
 const string pairAddress = "192.0.2.10:33861";
+const string usbDemoSerial = "USB1234";
+const string wirelessDemoSerial = "adb-USB1234-demo._adb-tls-connect._tcp";
+const string usbDemoDevice = "USB1234 device model:Pixel9 product:panther device:panther transport_id:1";
+const string wirelessDemoDevice =
+    "adb-USB1234-demo._adb-tls-connect._tcp device model:Pixel9 product:panther device:panther transport_id:2";
+
+if (args is ["screenshot", var screenshotPath])
+{
+    CaptureReadmeScreenshot(screenshotPath);
+    return 0;
+}
+
+if (args is ["screenshot-hover-off", var hoverOffPath])
+{
+    CaptureReadmeScreenshot(hoverOffPath, hoverEnabled: false);
+    return 0;
+}
+
+if (args is ["screenshot-toolbar", var toolbarScreenshotPath])
+{
+    CaptureToolbarScreenshot(toolbarScreenshotPath);
+    return 0;
+}
 
 if (args is ["pair", pairAddress, "000000"])
 {
@@ -112,6 +143,48 @@ var cases = new (string Name, Action Check)[]
             Require((hidden & 0x00000080) != 0 && (hidden & 0x00040000) == 0);
             controller.Detach();
             Require(TestNative.GetExStyle(handle) == original);
+        }
+        finally
+        {
+            target.Close();
+        }
+    })),
+    ("关闭无边框后窗口恢复系统非客户区", () => RunSta(() =>
+    {
+        EnsureApplication();
+        var target = new Window
+        {
+            Title = "无边框测试目标",
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            Width = 320,
+            Height = 200,
+            Left = -32000,
+            Top = 0,
+            ShowInTaskbar = false,
+        };
+        target.Show();
+        try
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(target).Handle;
+            using var controller = new WindowStyleController();
+            controller.Attach(handle);
+
+            var before = TestNative.GetRect(handle);
+            var (beforeWidth, beforeHeight, _, _) = TestNative.GetClientBounds(handle);
+            Require(before.Width == beforeWidth && before.Height == beforeHeight);
+
+            Require(controller.ApplyBorderless(false));
+            int style = TestNative.GetStyle(handle);
+            Require((style & 0x00C00000) != 0 && (style & 0x00040000) != 0);
+            var framed = TestNative.GetRect(handle);
+            var (framedWidth, framedHeight, _, _) = TestNative.GetClientBounds(handle);
+            Require(framed.Width > framedWidth || framed.Height > framedHeight);
+
+            Require(controller.ApplyBorderless(true));
+            var borderless = TestNative.GetRect(handle);
+            var (borderlessWidth, borderlessHeight, _, _) = TestNative.GetClientBounds(handle);
+            Require(borderless.Width == borderlessWidth && borderless.Height == borderlessHeight);
         }
         finally
         {
@@ -213,6 +286,14 @@ var cases = new (string Name, Action Check)[]
             int y = targetRect.Top + targetRect.Height / 2;
             TestNative.SetCursorPos(x, y);
             IntPtr hit = TestNative.WindowFromPoint(x, y);
+            var hitInfo = DesktopWindowInfo.Read(hit);
+            if (string.Equals(hitInfo.ProcessName, "LockApp", StringComparison.OrdinalIgnoreCase))
+            {
+                // 锁屏时桌面命中测试没有意义：WindowFromPoint 只会返回锁屏窗口。
+                Console.WriteLine("跳过 图片覆盖层系统命中：当前 Windows 已锁屏");
+                return;
+            }
+
             Require(TestNative.GetAncestor(hit, 2) == target.Handle);
         }
         finally
@@ -335,6 +416,33 @@ var cases = new (string Name, Action Check)[]
             window.Close();
         }
     })),
+    ("导航内容不会继承手型鼠标指针", () => RunSta(() =>
+    {
+        EnsureApplication();
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        var window = new MainWindow(controller, null!)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = -32000,
+            Top = 0,
+        };
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+            var top = (TabControl)window.FindName("TopNavigation")!;
+            var nav = (TabControl)window.FindName("Navigation")!;
+            var devicePage = (FrameworkElement)((TabItem)nav.Items[0]).Content;
+            var appPage = (FrameworkElement)((TabItem)top.Items[1]).Content;
+            Require(devicePage.Cursor is null || devicePage.Cursor == Cursors.Arrow);
+            Require(appPage.Cursor is null || appPage.Cursor == Cursors.Arrow);
+        }
+        finally
+        {
+            window.AllowClose();
+            window.Close();
+        }
+    })),
     ("智能悬停忽略路过的指针，停稳后显示并在离开时隐藏", () =>
     {
         var watcher = new MirrorHoverWatcher(() => null);
@@ -406,6 +514,59 @@ var cases = new (string Name, Action Check)[]
             toolbar.Close();
         }
     })),
+    ("工具条穿透按钮文字固定为鼠标穿透", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        Require(controller.PassThroughButtonText == "鼠标穿透");
+        controller.PassThrough = true;
+        Require(controller.PassThroughButtonText == "鼠标穿透");
+    }),
+    ("工具条跟随画面按 DPI 正确贴合", () => RunSta(() =>
+    {
+        EnsureApplication();
+        var target = new Window
+        {
+            Title = "工具条跟随目标",
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            Width = 400,
+            Height = 600,
+            Left = 200,
+            Top = 200,
+            ShowInTaskbar = false,
+            Topmost = true,
+        };
+        target.Show();
+        try
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(target).Handle;
+            using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+            controller.Window.Attach(handle);
+            var toolbar = new ToolbarWindow(controller, null!) { KeepVisibleWithoutPicture = true };
+            try
+            {
+                toolbar.ShowAbove();
+                PumpDispatcher(150);
+                var update = typeof(ToolbarWindow).GetMethod("UpdatePosition", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                update.Invoke(toolbar, null);
+
+                var targetRect = controller.Window.GetContentRect()!.Value;
+                var toolbarRect = TestNative.GetRect(new System.Windows.Interop.WindowInteropHelper(toolbar).Handle);
+                var scale = PresentationSource.FromVisual(toolbar)?.CompositionTarget?.TransformToDevice.M11 ?? 1;
+                Require(Math.Abs((toolbarRect.Left + toolbarRect.Right) / 2
+                                 - (targetRect.Left + targetRect.Right) / 2) <= 2);
+                Require(Math.Abs(toolbarRect.Bottom - (targetRect.Top + 8 * scale)) <= 2);
+            }
+            finally
+            {
+                toolbar.Close();
+            }
+        }
+        finally
+        {
+            target.Close();
+        }
+    })),
     ("同型号的不同设备不会被去重", () =>
     {
         using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
@@ -416,7 +577,8 @@ var cases = new (string Name, Action Check)[]
     }),
     ("连接发现设备优先复用已就绪的 mDNS 串号", () =>
     {
-        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        using var controller = new AppController(
+            new AppSettings { ConnectionMode = ConnectionModes.Lan }, Dispatcher.CurrentDispatcher);
         const string mdnsSerial = "adb-phone-TnSdi9._adb-tls-connect._tcp.";
         var services = SetWirelessSnapshots(controller, $"{connectAddress} device\n{mdnsSerial} device", connectAdvertisement);
         controller.ConnectDiscoveredLanAsync(services.Single()).GetAwaiter().GetResult();
@@ -424,7 +586,8 @@ var cases = new (string Name, Action Check)[]
     }),
     ("同一个 mDNS 实例有多个端点时仍使用手填的就绪地址", () =>
     {
-        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        using var controller = new AppController(
+            new AppSettings { ConnectionMode = ConnectionModes.Lan }, Dispatcher.CurrentDispatcher);
         SetWirelessSnapshots(controller, $"{connectAddress} device", connectAdvertisement,
             connectAdvertisement.Replace(connectAddress, "192.0.2.12:33015"));
         controller.ConnectLanAsync(connectAddress).GetAwaiter().GetResult();
@@ -433,7 +596,9 @@ var cases = new (string Name, Action Check)[]
     ("旧 IP 首选可选中已经合并成 mDNS 行的同一台设备", () =>
     {
         const string serial = "adb-phone-TnSdi9._adb-tls-connect._tcp";
-        using var controller = new AppController(new AppSettings { PreferredSerial = connectAddress }, Dispatcher.CurrentDispatcher);
+        using var controller = new AppController(
+            new AppSettings { PreferredSerial = connectAddress, ConnectionMode = ConnectionModes.Lan },
+            Dispatcher.CurrentDispatcher);
         var output = $"other-usb device\n{connectAddress} device\n{serial} device";
         SetWirelessSnapshots(controller, output, connectAdvertisement);
         var apply = typeof(AppController).GetMethod("OnDevicesSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -725,7 +890,7 @@ var cases = new (string Name, Action Check)[]
     }),
     ("无线设备清单未变化时不触发界面列表重建", () =>
     {
-        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        using var controller = new AppController(new AppSettings { ConnectionMode = ConnectionModes.Lan }, Dispatcher.CurrentDispatcher);
         var apply = typeof(AppController).GetMethod("OnDevicesSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
         const string readyDevice = "192.0.2.10:33015 device model:Test transport_id:1";
         apply.Invoke(controller, [AdbClient.ParseDevices(readyDevice)]);
@@ -772,6 +937,670 @@ var cases = new (string Name, Action Check)[]
         Require(AdbClient.IsConnectSuccess(new(0, $"already connected to {connectAddress}", "")));
         Require(!AdbClient.IsConnectSuccess(new(0, $"not connected to {connectAddress}", "")));
     }),
+    ("设备列表按连接方式筛选且选择跟随页签", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        ApplyDeviceSnapshot(controller, $"{usbDemoDevice}\n{wirelessDemoDevice}");
+        Require(controller.Devices.Count == 2);
+        Require(controller.VisibleDevices.Count == 1 && controller.VisibleDevices[0].Serial == usbDemoSerial);
+        Require(controller.SelectedDevice?.Serial == usbDemoSerial);
+
+        controller.ConnectionMode = ConnectionModes.Lan;
+        Require(controller.VisibleDevices.Count == 1 && controller.VisibleDevices[0].Serial == wirelessDemoSerial);
+        Require(controller.SelectedDevice?.Serial == wirelessDemoSerial);
+
+        controller.ConnectionMode = ConnectionModes.Usb;
+        Require(controller.VisibleDevices.Count == 1 && controller.SelectedDevice?.Serial == usbDemoSerial);
+    }),
+    ("同一手机的两个连接端点按页签各显示一个", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        ApplyDeviceSnapshot(controller, $"{usbDemoDevice}\n{wirelessDemoDevice}");
+        Require(controller.Devices.Count == 2);
+        Require(controller.Devices.Select(d => d.Model).Distinct().Count() == 1);
+        Require(controller.VisibleDevices.Single().TransportLabel == "USB");
+        controller.ConnectionMode = ConnectionModes.Lan;
+        Require(controller.VisibleDevices.Single().TransportLabel == "无线");
+        Require(controller.VisibleDevices.Single().TransportStateDescription == "无线 · 已授权，可连接");
+    }),
+    ("空页签清空选择并禁用开始投屏", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        ApplyDeviceSnapshot(controller, usbDemoDevice);
+        controller.ConnectionMode = ConnectionModes.Lan;
+        Require(controller.VisibleDevices.Count == 0 && controller.SelectedDevice is null);
+        Require(!controller.CanConnect && controller.Phase == ConnectionPhase.NoDevice);
+
+        controller.ConnectionMode = ConnectionModes.Usb;
+        Require(controller.VisibleDevices.Count == 1 && controller.CanConnect);
+    }),
+    ("可见列表重建后 ListBox 仍保持选中设备", () => RunSta(() =>
+    {
+        EnsureApplication();
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        ApplyDeviceSnapshot(controller,
+            $"{usbDemoDevice}\nUSB5678 device model:Pixel9 product:panther device:panther transport_id:2");
+        var host = new Window
+        {
+            Width = 320,
+            Height = 240,
+            Left = -32000,
+            Top = 0,
+            ShowInTaskbar = false,
+        };
+        var list = new ListBox { ItemsSource = controller.VisibleDevices };
+        list.SetBinding(ListBox.SelectedItemProperty, new Binding(nameof(AppController.SelectedDevice))
+        {
+            Source = controller,
+            Mode = System.Windows.Data.BindingMode.TwoWay,
+        });
+        host.Content = list;
+        host.Show();
+        try
+        {
+            list.SelectedItem = controller.VisibleDevices.Single(d => d.Serial == usbDemoSerial);
+            Require(controller.SelectedDevice?.Serial == usbDemoSerial);
+
+            // 另一台设备变为离线会触发可见列表重建；当前选中的 USB1234 仍在列表里，界面不能失去选中项。
+            ApplyDeviceSnapshot(controller,
+                $"{usbDemoDevice}\nUSB5678 offline model:Pixel9 product:panther device:panther transport_id:2");
+            Require(controller.SelectedDevice?.Serial == usbDemoSerial);
+            Require(list.SelectedItem is AdbDevice selected && selected.Serial == usbDemoSerial);
+        }
+        finally
+        {
+            host.Close();
+        }
+    })),
+    ("非当前页签的设备变化不重建可见列表", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        ApplyDeviceSnapshot(controller, $"{usbDemoDevice}\n{wirelessDemoDevice}");
+        var selection = controller.SelectedDevice;
+        int changes = 0;
+        controller.VisibleDevices.CollectionChanged += (_, _) => changes++;
+
+        ApplyDeviceSnapshot(controller,
+            $"{usbDemoDevice}\n{wirelessDemoDevice.Replace(" device ", " offline ")}");
+        Require(changes == 0);
+        Require(ReferenceEquals(controller.SelectedDevice, selection));
+    }),
+    ("开始投屏前拒绝当前页签之外的设备", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        ApplyDeviceSnapshot(controller, $"{usbDemoDevice}\n{wirelessDemoDevice}");
+        controller.SelectedDevice = controller.Devices.Single(d => d.Serial == wirelessDemoSerial);
+        Require(!controller.CanConnect);
+        controller.ConnectAsync().GetAwaiter().GetResult();
+        Require(controller.Notice.Contains("USB 有线") && controller.Phase != ConnectionPhase.Connecting);
+    }),
+    ("切换页签不会断开已连接会话", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        ApplyDeviceSnapshot(controller, $"{usbDemoDevice}\n{wirelessDemoDevice}");
+        var connected = controller.Devices.Single(d => d.Serial == usbDemoSerial);
+        SetControllerField(controller, "_connectedDevice", connected);
+        SetControllerField(controller, "_phase", ConnectionPhase.Connected);
+
+        controller.ConnectionMode = ConnectionModes.Lan;
+        Require(controller.IsConnected && controller.ConnectedDeviceText.Contains(usbDemoSerial));
+        Require(controller.SelectedDevice?.Serial == wirelessDemoSerial);
+    }),
+    ("USB 页签下无线连接失败不会清空当前选择", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        ApplyDeviceSnapshot(controller, usbDemoDevice);
+        var selected = controller.SelectedDevice;
+        Require(selected?.Serial == usbDemoSerial);
+
+        var adb = new AdbClient(Environment.ProcessPath!);
+        var monitor = new DeviceMonitor(adb);
+        typeof(DeviceMonitor).GetProperty(nameof(DeviceMonitor.Current))!.SetValue(
+            monitor, AdbClient.ParseDevices("192.0.2.10:33015 device model:Pixel9 product:panther device:panther transport_id:2"));
+        SetControllerField(controller, "_adb", adb);
+        SetControllerField(controller, "_monitor", monitor);
+
+        controller.ConnectLanAsync("192.0.2.10:33015").GetAwaiter().GetResult();
+        Require(ReferenceEquals(controller.SelectedDevice, selected));
+        Require(controller.VisibleDevices.Single().Serial == usbDemoSerial);
+    }),
+    ("USB 转无线仍从完整集合寻找 USB 设备", () =>
+    {
+        using var controller = new AppController(
+            new AppSettings { ConnectionMode = ConnectionModes.Lan }, Dispatcher.CurrentDispatcher);
+        ApplyDeviceSnapshot(controller, $"{usbDemoDevice}\n{wirelessDemoDevice}");
+        SetControllerField(controller, "_adb", new AdbClient(Environment.ProcessPath!));
+        controller.SwitchUsbToLanAsync("192.0.2.10").GetAwaiter().GetResult();
+        Require(controller.Notice.Contains("切换 TCP/IP 失败"));
+    }),
+    ("开始投屏参数使用当前页签的序列号", () =>
+    {
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        ApplyDeviceSnapshot(controller, $"{usbDemoDevice}\n{wirelessDemoDevice}");
+        var build = typeof(AppController)
+            .GetMethod("BuildStartOptions", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var usb = (ScrcpyStartOptions)build.Invoke(controller,
+            [controller.Devices.Single(d => d.Serial == usbDemoSerial)])!;
+        var wireless = (ScrcpyStartOptions)build.Invoke(controller,
+            [controller.Devices.Single(d => d.Serial == wirelessDemoSerial)])!;
+
+        Require(usb.Serial == usbDemoSerial && !usb.IsWireless);
+        Require(wireless.Serial == wirelessDemoSerial && wireless.IsWireless);
+        Require(ScrcpyRuntime.BuildArguments(usb).Contains($"--serial={usbDemoSerial}"));
+        Require(ScrcpyRuntime.BuildArguments(wireless).Contains($"--serial={wirelessDemoSerial}"));
+    }),
+    ("移开仍显示状态机转换", () =>
+    {
+        var state = new HoverRevealKeepState();
+        Require(!state.IsVisible && state.Phase == HoverRevealKeepPhase.Hidden);
+        Require(state.OnPointerEntered() && state.Phase == HoverRevealKeepPhase.Revealed);
+        Require(state.OnPointerLeft(keepEnabled: false) && !state.IsVisible);
+        Require(!state.OnClick(pointerInside: false));
+
+        state.OnPointerEntered();
+        Require(!state.OnPointerLeft(keepEnabled: true) && state.IsHolding && state.IsVisible);
+        Require(!state.OnPointerEntered() && state.IsHolding);
+        Require(state.OnClick(pointerInside: true)
+                && state.Phase == HoverRevealKeepPhase.Suppressed && !state.IsVisible);
+        Require(!state.OnPointerLeft(keepEnabled: true) && state.Phase == HoverRevealKeepPhase.Hidden);
+
+        state.OnPointerEntered();
+        state.OnPointerLeft(keepEnabled: true);
+        Require(state.OnKeepDisabled(pointerInside: false) && state.Phase == HoverRevealKeepPhase.Hidden);
+
+        state.OnPointerEntered();
+        state.OnPointerLeft(keepEnabled: true);
+        state.OnClick(pointerInside: true);
+        Require(state.OnKeepDisabled(pointerInside: true)
+                && state.Phase == HoverRevealKeepPhase.Revealed && state.IsVisible);
+        Require(state.Reset() && state.Phase == HoverRevealKeepPhase.Hidden);
+    }),
+    ("移开仍显示保持到点击，点击内部后抑制", () =>
+    {
+        var rect = new WindowRect(0, 0, 100, 100);
+        using var clicks = new GlobalMouseClickWatcher(Dispatcher.CurrentDispatcher);
+        using var watcher = new MirrorHoverWatcher(() => rect, clickWatcher: clicks);
+        watcher.KeepEnabled = true;
+        watcher.SetDelay(0, false);
+        var events = new List<bool>();
+        watcher.HoverChanged += shown => events.Add(shown);
+
+        SampleHover(watcher, 50, 0);
+        Require(watcher.IsRevealed && watcher.Phase == HoverRevealKeepPhase.Revealed);
+        SampleHover(watcher, 200, 100);
+        Require(watcher.IsRevealed && watcher.IsHolding);
+        Require(clicks.ActiveHoldCount == 1 && clicks.IsInstalled);
+
+        InvokeClick(watcher, 50, 50);
+        Require(!watcher.IsRevealed && watcher.Phase == HoverRevealKeepPhase.Suppressed);
+        Require(!watcher.IsHolding && clicks.ActiveHoldCount == 0 && !clicks.IsInstalled);
+        Require(events.SequenceEqual([true, false]));
+
+        SampleHover(watcher, 50, 200);
+        Require(!watcher.IsRevealed);
+        SampleHover(watcher, 200, 300);
+        Require(!watcher.IsRevealed);
+        SampleHover(watcher, 50, 400);
+        Require(watcher.IsRevealed && events.SequenceEqual([true, false, true]));
+
+        watcher.Stop();
+        Require(!watcher.IsRevealed && clicks.ActiveHoldCount == 0);
+    }),
+    ("移开仍显示点击区域外直接隐藏且不抑制", () =>
+    {
+        var rect = new WindowRect(0, 0, 100, 100);
+        using var clicks = new GlobalMouseClickWatcher(Dispatcher.CurrentDispatcher);
+        using var watcher = new MirrorHoverWatcher(() => rect, clickWatcher: clicks);
+        watcher.KeepEnabled = true;
+        watcher.SetDelay(0, false);
+
+        SampleHover(watcher, 50, 0);
+        SampleHover(watcher, 200, 100);
+        InvokeClick(watcher, 200, 200);
+        Require(!watcher.IsRevealed && watcher.Phase == HoverRevealKeepPhase.Hidden);
+
+        SampleHover(watcher, 50, 200);
+        Require(watcher.IsRevealed);
+    }),
+    ("关闭移开仍显示时按指针位置立即恢复", () =>
+    {
+        var rect = new WindowRect(0, 0, 100, 100);
+        using var clicks = new GlobalMouseClickWatcher(Dispatcher.CurrentDispatcher);
+        using var watcher = new MirrorHoverWatcher(() => rect, clickWatcher: clicks);
+        watcher.KeepEnabled = true;
+        watcher.SetDelay(0, false);
+
+        SampleHover(watcher, 50, 0);
+        SampleHover(watcher, 200, 100);
+        Require(watcher.IsRevealed && watcher.IsHolding);
+        watcher.KeepEnabled = false;
+        Require(!watcher.IsRevealed && !watcher.IsHolding && clicks.ActiveHoldCount == 0);
+    }),
+    ("关闭移开仍显示时指针在区域内保持显示", () =>
+    {
+        var rect = new WindowRect(0, 0, 100, 100);
+        using var clicks = new GlobalMouseClickWatcher(Dispatcher.CurrentDispatcher);
+        using var watcher = new MirrorHoverWatcher(() => rect, clickWatcher: clicks);
+        watcher.KeepEnabled = true;
+        watcher.SetDelay(0, false);
+
+        SampleHover(watcher, 50, 0);
+        SampleHover(watcher, 200, 100);
+        InvokeClick(watcher, 50, 50);
+        Require(watcher.Phase == HoverRevealKeepPhase.Suppressed && !watcher.IsRevealed);
+
+        watcher.KeepEnabled = false;
+        Require(watcher.IsRevealed && watcher.Phase == HoverRevealKeepPhase.Revealed);
+    }),
+    ("手机和普通应用的移开仍显示配置互相独立", () =>
+    {
+        var settings = new AppSettings();
+        Require(!settings.HoverRevealKeepOnLeave && !settings.AppWindow.HoverKeepOnLeave);
+        settings.HoverRevealKeepOnLeave = true;
+        Require(settings.HoverRevealKeepOnLeave && !settings.AppWindow.HoverKeepOnLeave);
+
+        var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Require(json.Contains("\"hoverRevealKeepOnLeave\":true"));
+        Require(!json.Contains("\"hoverKeepOnLeave\":true"));
+    }),
+    ("全局点击监听按保持状态安装和卸载", () =>
+    {
+        using var clicks = new GlobalMouseClickWatcher(Dispatcher.CurrentDispatcher);
+        var first = new object();
+        var second = new object();
+        Require(!clicks.IsInstalled && clicks.ActiveHoldCount == 0);
+
+        clicks.SetHold(first, true);
+        Require(clicks.IsInstalled && clicks.ActiveHoldCount == 1);
+        clicks.SetHold(second, true);
+        Require(clicks.IsInstalled && clicks.ActiveHoldCount == 2);
+        clicks.SetHold(first, false);
+        Require(clicks.IsInstalled && clicks.ActiveHoldCount == 1);
+        clicks.SetHold(second, false);
+        Require(!clicks.IsInstalled && clicks.ActiveHoldCount == 0);
+
+        clicks.SetHold(second, false);
+        Require(clicks.ActiveHoldCount == 0);
+    }),
+    ("全局点击事件在界面线程延后投递", () => RunSta(() =>
+    {
+        using var clicks = new GlobalMouseClickWatcher(Dispatcher.CurrentDispatcher);
+        GlobalMouseClick? received = null;
+        clicks.Clicked += click => received = click;
+        var post = typeof(GlobalMouseClickWatcher)
+            .GetMethod("PostClick", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        post.Invoke(clicks, [new GlobalMouseClick(10, 20, 0x0202)]);
+
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            Dispatcher.CurrentDispatcher.InvokeShutdown();
+        };
+        timer.Start();
+        Dispatcher.Run();
+        Require(received is { X: 10, Y: 20 });
+    })),
+    ("界面解释统一使用圆形问号并保留可访问名称", () => RunSta(() =>
+    {
+        EnsureApplication();
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        var window = new MainWindow(controller, null!);
+        var toolbar = new ToolbarWindow(controller, null!);
+        try
+        {
+            var names = Descendants<HelpTip>(window).Select(AutomationProperties.GetName).ToHashSet();
+            Require(names.Contains("鼠标穿透说明"));
+            Require(names.Contains("移开仍显示说明"));
+            Require(names.Contains("悬停显示延迟说明"));
+            Require(names.Contains("配对地址说明"));
+            Require(Descendants<HelpTip>(window).All(tip => AutomationProperties.GetHelpText(tip).Length > 0));
+
+            var toolbarNames = Descendants<HelpTip>(toolbar).Select(AutomationProperties.GetName).ToHashSet();
+            Require(toolbarNames.Contains("不透明度说明"));
+            Require(toolbarNames.Contains("工具条拖动说明"));
+
+            var tip = Descendants<HelpTip>(window).First();
+            var content = (TextBlock)typeof(HelpTip)
+                .GetField("_content", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(tip)!;
+            Require(content.TextWrapping == TextWrapping.Wrap && content.MaxWidth <= 360);
+        }
+        finally
+        {
+            toolbar.Close();
+            window.AllowClose();
+            window.Close();
+        }
+    })),
+    ("普通应用窗口最小化恢复后重新启用悬停监听", () => RunSta(() =>
+    {
+        EnsureApplication();
+        string recoveryPath = Path.Combine(Path.GetTempPath(), $"ln-mirror-minimize-{Guid.NewGuid():N}.json");
+        using var target = new System.Windows.Forms.Form
+        {
+            Text = "最小化悬停目标",
+            FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+            StartPosition = System.Windows.Forms.FormStartPosition.Manual,
+            Location = new System.Drawing.Point(-32000, 0),
+            Size = new System.Drawing.Size(320, 200),
+            ShowInTaskbar = false,
+        };
+        target.Show();
+        try
+        {
+            using var controller = new DesktopAppController(
+                new AppSettings(), Dispatcher.CurrentDispatcher, recoveryPath, _ => { });
+            controller.SelectWindow(DesktopWindowInfo.Read(target.Handle));
+            controller.SetDisplayMode(AppWindowDisplayModes.HoverReveal);
+            PumpDispatcher(150);
+
+            var watcher = (MirrorHoverWatcher)typeof(DesktopAppController)
+                .GetField("_hoverWatcher", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(controller)!;
+            var tick = typeof(DesktopAppController)
+                .GetMethod("Tick", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            Require(HoverTimer(watcher).IsEnabled);
+
+            TestNative.ShowWindow(target.Handle, 6);
+            PumpDispatcher(100);
+            tick.Invoke(controller, [null, EventArgs.Empty]);
+            Require(TestNative.IsIconic(target.Handle));
+            Require(!HoverTimer(watcher).IsEnabled);
+
+            TestNative.ShowWindow(target.Handle, 9);
+            PumpDispatcher(100);
+            tick.Invoke(controller, [null, EventArgs.Empty]);
+            Require(!TestNative.IsIconic(target.Handle));
+            Require(HoverTimer(watcher).IsEnabled);
+            controller.Restore();
+        }
+        finally
+        {
+            target.Close();
+            if (File.Exists(recoveryPath)) File.Delete(recoveryPath);
+        }
+    })),
+    ("问号说明可由键盘焦点打开和关闭", () => RunSta(() =>
+    {
+        EnsureApplication();
+        var tip = new HelpTip { Text = "测试说明" };
+        var host = new Window
+        {
+            Width = 240,
+            Height = 120,
+            Left = -32000,
+            Top = 0,
+            Content = tip,
+            ShowInTaskbar = false,
+        };
+        host.Show();
+        try
+        {
+            var toolTip = (ToolTip)tip.ToolTip;
+            var got = typeof(HelpTip).GetMethod("OnGotKeyboardFocus", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var lost = typeof(HelpTip).GetMethod("OnLostKeyboardFocus", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            got.Invoke(tip, [new KeyboardFocusChangedEventArgs(Keyboard.PrimaryDevice, 0, null, tip)]);
+            Require(toolTip.IsOpen);
+            lost.Invoke(tip, [new KeyboardFocusChangedEventArgs(Keyboard.PrimaryDevice, 0, tip, null)]);
+            Require(!toolTip.IsOpen);
+
+            // 问号嵌在复选框内容里时，鼠标按下/抬起必须由问号自己处理掉，不能触发父复选框。
+            var down = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
+            {
+                RoutedEvent = UIElement.MouseLeftButtonDownEvent,
+            };
+            tip.RaiseEvent(down);
+            Require(down.Handled);
+        }
+        finally
+        {
+            host.Close();
+        }
+    })),
+    ("四边把手只命中中间三分之一，四角保留", () => RunSta(() =>
+    {
+        EnsureApplication();
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        var overlay = new MirrorFrameOverlayWindow(controller);
+        try
+        {
+            StopOverlayTimer(overlay);
+            overlay.Left = -32000;
+            overlay.Top = 0;
+            overlay.Width = 900;
+            overlay.Height = 600;
+            overlay.Show();
+            overlay.UpdateLayout();
+
+            var layer = (Grid)overlay.FindName("HandleLayer")!;
+            layer.Visibility = Visibility.Visible;
+            overlay.UpdateLayout();
+
+            Require(HandleTagAt(layer, 450, 7) == "Move");
+            Require(HandleTagAt(layer, 450, 12) == "Move");
+            Require(HandleTagAt(layer, 150, 7) is null);
+            Require(HandleTagAt(layer, 750, 7) is null);
+            Require(HandleTagAt(layer, 7, 300) == "Move");
+            Require(HandleTagAt(layer, 12, 300) == "Move");
+            Require(HandleTagAt(layer, 7, 100) is null);
+            Require(HandleTagAt(layer, 7, 500) is null);
+            Require(HandleTagAt(layer, 2, 2) == "NW");
+            Require(HandleTagAt(layer, 898, 2) == "NE");
+            Require(HandleTagAt(layer, 450, 593) == "Move");
+            Require(HandleTagAt(layer, 2, 598) == "SW");
+            Require(HandleTagAt(layer, 898, 598) == "SE");
+            Require(HandleTagAt(layer, 450, 300) is null);
+        }
+        finally
+        {
+            overlay.Close();
+        }
+    })),
+    ("把手扩展命中区具有非零透明像素", () => RunSta(() =>
+    {
+        EnsureApplication();
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        var overlay = new MirrorFrameOverlayWindow(controller);
+        try
+        {
+            StopOverlayTimer(overlay);
+            overlay.Left = -32000;
+            overlay.Top = 0;
+            overlay.Width = 900;
+            overlay.Height = 600;
+            overlay.Show();
+            overlay.UpdateLayout();
+
+            var layer = (Grid)overlay.FindName("HandleLayer")!;
+            layer.Visibility = Visibility.Visible;
+            overlay.UpdateLayout();
+
+            var bitmap = new RenderTargetBitmap(900, 600, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(layer);
+            var pixels = new byte[900 * 600 * 4];
+            bitmap.CopyPixels(pixels, 900 * 4, 0);
+
+            // 分层窗口按像素 alpha 命中：扩展区必须是非零 alpha，死区必须是 0。
+            Require(AlphaAt(pixels, 900, 450, 12) > 0);
+            Require(AlphaAt(pixels, 900, 450, 7) > 0);
+            Require(AlphaAt(pixels, 900, 150, 7) == 0);
+            Require(AlphaAt(pixels, 900, 12, 300) > 0);
+            Require(AlphaAt(pixels, 900, 450, 300) == 0);
+        }
+        finally
+        {
+            overlay.Close();
+        }
+    })),
+    ("拖动把手按真实窗口移动并同步覆盖层", () => RunSta(() =>
+    {
+        EnsureApplication();
+        var target = new Window
+        {
+            Title = "拖动测试目标",
+            WindowStyle = WindowStyle.None,
+            Width = 420,
+            Height = 300,
+            Left = -32000,
+            Top = 0,
+            ShowInTaskbar = false,
+            Topmost = true,
+        };
+        target.Show();
+        try
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(target).Handle;
+            using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+            controller.Window.Attach(handle);
+            var overlay = new MirrorFrameOverlayWindow(controller);
+            try
+            {
+                StopOverlayTimer(overlay);
+                overlay.Left = -32000;
+                overlay.Top = 0;
+                overlay.Show();
+                overlay.UpdateLayout();
+
+                var topHandle = (FrameworkElement)overlay.FindName("TopMoveHandle")!;
+                var start = TestNative.GetRect(handle);
+                int startX = start.Left + 210;
+                int startY = start.Top + 7;
+                var begin = typeof(MirrorFrameOverlayWindow)
+                    .GetMethod("BeginDrag", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var dragTo = typeof(MirrorFrameOverlayWindow)
+                    .GetMethod("DragTo", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var end = typeof(MirrorFrameOverlayWindow)
+                    .GetMethod("EndDrag", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+                Require((bool)begin.Invoke(overlay, ["Move", topHandle, startX, startY])!);
+                Require(IsOverlayDragging(overlay));
+                Require((bool)dragTo.Invoke(overlay, [startX + 40, startY + 25])!);
+
+                var moved = TestNative.GetRect(handle);
+                Require(moved.Left == start.Left + 40 && moved.Top == start.Top + 25);
+                var content = controller.Window.GetContentRect()!.Value;
+                var transform = PresentationSource.FromVisual(overlay)?.CompositionTarget?.TransformFromDevice
+                                ?? Matrix.Identity;
+                Require(Math.Abs(overlay.Left - content.Left * transform.M11) <= 1);
+                Require(Math.Abs(overlay.Top - content.Top * transform.M22) <= 1);
+
+                end.Invoke(overlay, [true]);
+                Require(!IsOverlayDragging(overlay));
+                Require(controller.Settings.MirrorPlacement is { HasValue: true } placement
+                        && placement.X == moved.Left && placement.Y == moved.Top);
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        }
+        finally
+        {
+            target.Close();
+        }
+    })),
+    ("四角拖动按视频比例缩放", () => RunSta(() =>
+    {
+        EnsureApplication();
+        var target = new Window
+        {
+            Title = "四角缩放目标",
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            Width = 240,
+            Height = 400,
+            Left = -32000,
+            Top = 0,
+            ShowInTaskbar = false,
+            Topmost = true,
+        };
+        target.Show();
+        try
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(target).Handle;
+            using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+            controller.Window.Attach(handle);
+            SetControllerField(controller, "_videoSize", ((int Width, int Height)?)(600, 1000));
+            var overlay = new MirrorFrameOverlayWindow(controller);
+            try
+            {
+                StopOverlayTimer(overlay);
+                overlay.Left = -32000;
+                overlay.Top = 0;
+                overlay.Show();
+                overlay.UpdateLayout();
+
+                var corner = (FrameworkElement)overlay.FindName("CornerSE")!;
+                var start = TestNative.GetRect(handle);
+                var begin = typeof(MirrorFrameOverlayWindow)
+                    .GetMethod("BeginDrag", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var dragTo = typeof(MirrorFrameOverlayWindow)
+                    .GetMethod("DragTo", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var end = typeof(MirrorFrameOverlayWindow)
+                    .GetMethod("EndDrag", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+                Require((bool)begin.Invoke(overlay, ["SE", corner, start.Right - 2, start.Bottom - 2])!);
+                Require((bool)dragTo.Invoke(overlay, [start.Right - 2 + 120, start.Bottom - 2 + 100])!);
+
+                var resized = TestNative.GetRect(handle);
+                Require(resized.Left == start.Left && resized.Top == start.Top);
+                Require(resized.Width > start.Width && resized.Height > start.Height);
+                Require(Math.Abs(resized.Width / (double)resized.Height - 600.0 / 1000.0) < 0.02);
+                end.Invoke(overlay, [false]);
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        }
+        finally
+        {
+            target.Close();
+        }
+    })),
+    ("拖动中窗口失效会结束拖动而不是卡住", () => RunSta(() =>
+    {
+        EnsureApplication();
+        var target = new Window
+        {
+            Title = "拖动失败目标",
+            WindowStyle = WindowStyle.None,
+            Width = 420,
+            Height = 300,
+            Left = -32000,
+            Top = 0,
+            ShowInTaskbar = false,
+            Topmost = true,
+        };
+        target.Show();
+        using var controller = new AppController(new AppSettings(), Dispatcher.CurrentDispatcher);
+        controller.Window.Attach(new System.Windows.Interop.WindowInteropHelper(target).Handle);
+        var overlay = new MirrorFrameOverlayWindow(controller);
+        try
+        {
+            StopOverlayTimer(overlay);
+            overlay.Show();
+            overlay.UpdateLayout();
+
+            var topHandle = (FrameworkElement)overlay.FindName("TopMoveHandle")!;
+            var rect = TestNative.GetRect(controller.Window.Handle);
+            var begin = typeof(MirrorFrameOverlayWindow)
+                .GetMethod("BeginDrag", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var dragTo = typeof(MirrorFrameOverlayWindow)
+                .GetMethod("DragTo", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            Require((bool)begin.Invoke(overlay, ["Move", topHandle, rect.Left + 210, rect.Top + 7])!);
+
+            target.Close();
+            Require(!(bool)dragTo.Invoke(overlay, [rect.Left + 260, rect.Top + 40])!);
+            Require(!IsOverlayDragging(overlay));
+        }
+        finally
+        {
+            overlay.Close();
+        }
+    })),
 };
 
 var failures = 0;
@@ -945,6 +1774,234 @@ static ScrcpyStartOptions EnableWirelessSmoothing(string serial)
 static void SetControllerField(AppController controller, string name, object value)
     => typeof(AppController).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(controller, value);
 
+static void CaptureReadmeScreenshot(string path, bool hoverEnabled = true)
+{
+    TestNative.SetProcessDPIAware();
+    Exception? failure = null;
+    var thread = new Thread(() =>
+    {
+        try
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            EnsureApplication();
+            SettingsStore.ReadOnly = true;
+            var settings = new AppSettings
+            {
+                ConnectionMode = ConnectionModes.Lan,
+                HoverRevealEnabled = hoverEnabled,
+            };
+            using var controller = new AppController(settings, dispatcher);
+            var window = new MainWindow(controller, null!)
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = 40,
+                Top = 40,
+                Width = 1100,
+                Height = 840,
+            };
+            window.Show();
+            ApplyDeviceSnapshot(controller, $"{usbDemoDevice}\n{wirelessDemoDevice}");
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                try
+                {
+                    var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+                    CaptureWindow(handle, path);
+                    Console.WriteLine($"截图已保存：{path}");
+                }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                }
+                finally
+                {
+                    window.AllowClose();
+                    window.Close();
+                    dispatcher.InvokeShutdown();
+                }
+            };
+            timer.Start();
+            Dispatcher.Run();
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start();
+    thread.Join();
+    if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+}
+
+static void CaptureToolbarScreenshot(string path)
+{
+    TestNative.SetProcessDPIAware();
+    Exception? failure = null;
+    var thread = new Thread(() =>
+    {
+        try
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            EnsureApplication();
+            SettingsStore.ReadOnly = true;
+            using var controller = new AppController(new AppSettings(), dispatcher);
+            var toolbar = new ToolbarWindow(controller, null!) { KeepVisibleWithoutPicture = true };
+            toolbar.ShowAbove();
+            toolbar.Left = 40;
+            toolbar.Top = 40;
+
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                try
+                {
+                    var handle = new System.Windows.Interop.WindowInteropHelper(toolbar).Handle;
+                    CaptureWindow(handle, path);
+                    Console.WriteLine($"截图已保存：{path}");
+                }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                }
+                finally
+                {
+                    toolbar.Close();
+                    dispatcher.InvokeShutdown();
+                }
+            };
+            timer.Start();
+            Dispatcher.Run();
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start();
+    thread.Join();
+    if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+}
+
+static void CaptureWindow(IntPtr handle, string path)
+{
+    var rect = TestNative.GetRect(handle);
+    int width = rect.Width;
+    int height = rect.Height;
+    Require(width > 100 && height > 100);
+
+    using var bitmap = new System.Drawing.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+    using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+    {
+        var hdc = graphics.GetHdc();
+        try
+        {
+            if (!TestNative.PrintWindow(handle, hdc, 2)) throw new InvalidOperationException("PrintWindow 失败");
+        }
+        finally
+        {
+            graphics.ReleaseHdc(hdc);
+        }
+    }
+
+    // 只保留客户区，去掉标题栏、边框和 PrintWindow 留下的黑边（与旧 README 截图一致）。
+    var (clientWidth, clientHeight, offsetX, offsetY) = TestNative.GetClientBounds(handle);
+    if (clientWidth > 100 && clientHeight > 100
+        && offsetX >= 0 && offsetY >= 0 && offsetX + clientWidth <= width && offsetY + clientHeight <= height)
+    {
+        using var cropped = new System.Drawing.Bitmap(clientWidth, clientHeight,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var graphics = System.Drawing.Graphics.FromImage(cropped))
+        {
+            graphics.DrawImage(bitmap,
+                new System.Drawing.Rectangle(0, 0, clientWidth, clientHeight),
+                new System.Drawing.Rectangle(offsetX, offsetY, clientWidth, clientHeight),
+                System.Drawing.GraphicsUnit.Pixel);
+        }
+
+        var directory = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+        cropped.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        return;
+    }
+
+    var fallbackDirectory = Path.GetDirectoryName(Path.GetFullPath(path));
+    if (!string.IsNullOrEmpty(fallbackDirectory)) Directory.CreateDirectory(fallbackDirectory);
+    bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+}
+
+static void ApplyDeviceSnapshot(AppController controller, string devices)
+{
+    var apply = typeof(AppController).GetMethod("OnDevicesSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    apply.Invoke(controller, [AdbClient.ParseDevices(devices)]);
+}
+
+static void InvokeClick(MirrorHoverWatcher watcher, int x, int y)
+{
+    var click = typeof(MirrorHoverWatcher).GetMethod("OnGlobalClick", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    click.Invoke(watcher, [new GlobalMouseClick(x, y, 0x0202)]);
+}
+
+static void StopOverlayTimer(MirrorFrameOverlayWindow overlay)
+{
+    var timer = (DispatcherTimer)typeof(MirrorFrameOverlayWindow)
+        .GetField("_timer", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .GetValue(overlay)!;
+    timer.Stop();
+}
+
+static string? HandleTagAt(UIElement root, double x, double y)
+{
+    var hit = root.InputHitTest(new Point(x, y)) as DependencyObject;
+    while (hit is not null)
+    {
+        if (hit is FrameworkElement { Tag: string tag }) return tag;
+        hit = VisualTreeHelper.GetParent(hit);
+    }
+
+    return null;
+}
+
+static byte AlphaAt(byte[] pixels, int width, int x, int y)
+    => pixels[(y * width + x) * 4 + 3];
+
+static DispatcherTimer HoverTimer(MirrorHoverWatcher watcher)
+    => (DispatcherTimer)typeof(MirrorHoverWatcher)
+        .GetField("_timer", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .GetValue(watcher)!;
+
+static void PumpDispatcher(int milliseconds)
+{
+    var frame = new DispatcherFrame();
+    var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(milliseconds) };
+    timer.Tick += (_, _) =>
+    {
+        timer.Stop();
+        frame.Continue = false;
+    };
+    timer.Start();
+    Dispatcher.PushFrame(frame);
+}
+
+static bool IsOverlayDragging(MirrorFrameOverlayWindow overlay)
+    => (bool)typeof(MirrorFrameOverlayWindow)
+        .GetProperty("IsDragging", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .GetValue(overlay)!;
+
+static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+{
+    foreach (var child in LogicalTreeHelper.GetChildren(root))
+    {
+        if (child is not DependencyObject element) continue;
+        if (element is T match) yield return match;
+        foreach (var nested in Descendants<T>(element)) yield return nested;
+    }
+}
+
 static class TestNative
 {
     [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
@@ -953,13 +2010,32 @@ static class TestNative
     public static int GetExStyle(IntPtr hWnd)
         => unchecked((int)GetWindowLongPtr(hWnd, -20).ToInt64());
 
+    public static int GetStyle(IntPtr hWnd)
+        => unchecked((int)GetWindowLongPtr(hWnd, -16).ToInt64());
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
 
     public static WindowRect GetRect(IntPtr hWnd)
     {
         GetWindowRect(hWnd, out var rect);
         return new WindowRect(rect.Left, rect.Top, rect.Right, rect.Bottom);
+    }
+
+    public static (int Width, int Height, int OffsetX, int OffsetY) GetClientBounds(IntPtr hWnd)
+    {
+        GetWindowRect(hWnd, out var window);
+        if (!GetClientRect(hWnd, out var client)) return (0, 0, 0, 0);
+        var origin = new POINT();
+        if (!ClientToScreen(hWnd, ref origin)) return (0, 0, 0, 0);
+        return (client.Right - client.Left, client.Bottom - client.Top,
+            origin.X - window.Left, origin.Y - window.Top);
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -969,6 +2045,7 @@ static class TestNative
     public static void RaiseWindow(IntPtr hWnd)
         => SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
 
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
 
@@ -976,6 +2053,18 @@ static class TestNative
     private static extern IntPtr WindowFromPoint(POINT point);
 
     public static IntPtr WindowFromPoint(int x, int y) => WindowFromPoint(new POINT { X = x, Y = y });
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);

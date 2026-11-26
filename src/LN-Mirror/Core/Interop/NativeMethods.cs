@@ -70,12 +70,52 @@ internal static class NativeMethods
     internal const int VK_RBUTTON = 0x02;
     internal const int VK_MBUTTON = 0x04;
 
+    // 全局鼠标点击监听：只观察按下，不拦截、不转发。
+    internal const int WH_MOUSE_LL = 14;
+    internal const int WM_MOUSEMOVE = 0x0200;
+    internal const int WM_LBUTTONDOWN = 0x0201;
+    internal const int WM_LBUTTONUP = 0x0202;
+    internal const int WM_RBUTTONDOWN = 0x0204;
+    internal const int WM_RBUTTONUP = 0x0205;
+    internal const int WM_MBUTTONDOWN = 0x0207;
+    internal const int WM_MBUTTONUP = 0x0208;
+    internal const int WM_XBUTTONDOWN = 0x020B;
+    internal const int WM_XBUTTONUP = 0x020C;
+    internal const int SM_CXDRAG = 68;
+    internal const int SM_CYDRAG = 69;
+    internal const uint WM_QUIT = 0x0012;
+    internal const uint PM_NOREMOVE = 0x0000;
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct POINT
     {
         public int X;
         public int Y;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MSLLHOOKSTRUCT
+    {
+        public POINT pt;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MSG
+    {
+        public IntPtr hwnd;
+        public uint message;
+        public IntPtr wParam;
+        public IntPtr lParam;
+        public uint time;
+        public POINT pt;
+        public uint lPrivate;
+    }
+
+    internal delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct RECT
@@ -201,6 +241,43 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern short GetAsyncKeyState(int vKey);
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern IntPtr GetModuleHandleW(IntPtr lpModuleName);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern IntPtr SetWindowsHookExW(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    internal static extern int GetMessageW(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool PeekMessageW(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool TranslateMessage(ref MSG lpMsg);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    internal static extern IntPtr DispatchMessageW(ref MSG lpMsg);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool PostThreadMessageW(uint idThread, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll")]
+    internal static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    internal static extern int GetSystemMetrics(int nIndex);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool PostMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -307,5 +384,11 @@ internal static class NativeMethods
         return (GetAsyncKeyState(VK_LBUTTON) & highBit) != 0
             || (GetAsyncKeyState(VK_RBUTTON) & highBit) != 0
             || (GetAsyncKeyState(VK_MBUTTON) & highBit) != 0;
+    }
+
+    internal static bool IsLeftMouseButtonHeld()
+    {
+        const short highBit = unchecked((short)0x8000);
+        return (GetAsyncKeyState(VK_LBUTTON) & highBit) != 0;
     }
 }

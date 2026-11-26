@@ -87,6 +87,9 @@ public sealed class AppWindowSettings
     public string DisplayMode { get; set; } = AppWindowDisplayModes.Original;
     public string ImagePath { get; set; } = string.Empty;
     public string ImageStretch { get; set; } = "Uniform";
+
+    /// <summary>悬停显示后，鼠标移开仍保持显示，直到下一次鼠标点击。</summary>
+    public bool HoverKeepOnLeave { get; set; }
 }
 
 /// <summary>本地配置。只保存显示偏好与非敏感的局域网连接信息，不保存配对码等授权凭据。</summary>
@@ -135,6 +138,9 @@ public sealed class AppSettings
 
     /// <summary>开启后画面常态完全透明，鼠标移到画面上才显示出来。</summary>
     public bool HoverRevealEnabled { get; set; }
+
+    /// <summary>悬停显示后，鼠标移开仍保持显示，直到下一次鼠标点击。</summary>
+    public bool HoverRevealKeepOnLeave { get; set; }
 
     public string HoverDelayMode { get; set; } = HoverDelayModes.Smart;
 

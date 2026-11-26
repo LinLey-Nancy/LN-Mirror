@@ -31,11 +31,11 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
     private WindowRect? _targetRect;
     private string _notice = string.Empty;
     private string _statusText = "请选择一个窗口";
-    private bool _pointerInside;
     private bool _maskVisible;
     private bool _elevationRequired;
     private bool _disposed;
     private bool _appearanceDirty = true;
+    private bool _wasMinimized;
     private long _lastRefresh;
     private int _effectiveTargetOpacity = 100;
     private int _lastError;
@@ -51,13 +51,15 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
         AppSettings settings,
         Dispatcher dispatcher,
         string? recoveryFilePath = null,
-        Action<AppSettings>? saveSettings = null)
+        Action<AppSettings>? saveSettings = null,
+        GlobalMouseClickWatcher? clickWatcher = null)
     {
         _settings = settings;
         _saveSettings = saveSettings;
         _recovery = new WindowRecoveryStore(recoveryFilePath ?? Path.Combine(SettingsStore.AppDataDirectory, "app-window-recovery.json"));
         _recovery.Recover();
-        _hoverWatcher = new MirrorHoverWatcher(() => TargetRect);
+        _hoverWatcher = new MirrorHoverWatcher(() => TargetRect, clickWatcher: clickWatcher);
+        _hoverWatcher.KeepEnabled = settings.AppWindow.HoverKeepOnLeave;
         _hoverWatcher.SetDelay(0, false);
         _hoverWatcher.HoverChanged += OnHoverChanged;
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(60), DispatcherPriority.Background, Tick, dispatcher);
@@ -133,6 +135,21 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
         }
     }
 
+    /// <summary>两种悬停模式下，鼠标移开后保持显示，直到下一次任意鼠标点击。</summary>
+    public bool KeepOnLeave
+    {
+        get => _settings.AppWindow.HoverKeepOnLeave;
+        set
+        {
+            if (_settings.AppWindow.HoverKeepOnLeave == value) return;
+            _settings.AppWindow.HoverKeepOnLeave = value;
+            _hoverWatcher.KeepEnabled = value;
+            SaveSettings();
+            OnPropertyChanged();
+            InvalidateAppearance();
+        }
+    }
+
     public string DisplayMode
     {
         get => _settings.AppWindow.DisplayMode;
@@ -143,7 +160,7 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
     public bool UsesHover => AppWindowDisplayModes.UsesHover(DisplayMode);
     public bool HasImage => _maskImage is not null;
     public bool IsImageMode => UsesImage;
-    public string OpacityLabel => UsesImage && !(_pointerInside && DisplayMode == AppWindowDisplayModes.ImageHoverReveal)
+    public string OpacityLabel => UsesImage && !(_hoverWatcher.IsRevealed && DisplayMode == AppWindowDisplayModes.ImageHoverReveal)
         ? "图片不透明度"
         : "窗口不透明度";
     public string ImagePath => _settings.AppWindow.ImagePath;
@@ -272,7 +289,6 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
             _window.Attach(info.Handle);
             _recovery.Save(info, _window.CreateSnapshot());
             _window.RestoreIfMinimized();
-            _pointerInside = false;
             ElevationRequired = false;
             LastError = 0;
             Notice = string.Empty;
@@ -332,7 +348,7 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
         if (_settings.AppWindow.DisplayMode == mode) return;
         _settings.AppWindow.DisplayMode = mode;
         SaveSettings();
-        _pointerInside = false;
+        _hoverWatcher.Stop();
         OnPropertyChanged(nameof(DisplayMode));
         OnPropertyChanged(nameof(UsesImage));
         OnPropertyChanged(nameof(UsesHover));
@@ -346,6 +362,7 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
         if (!CanRequestElevation || _selectedWindow is not { } target) return;
         IsBusy = true;
         Notice = "正在等待 Windows 管理员授权…";
+        _hoverWatcher.Stop();
         try
         {
             var handle = target.Handle;
@@ -402,7 +419,7 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
     {
         _applyVersion++;
         _hoverWatcher.Stop();
-        _pointerInside = false;
+        _wasMinimized = false;
         MaskVisible = false;
         TargetRect = null;
         _elevatedSession?.Dispose();
@@ -448,7 +465,7 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
 
         try
         {
-            var state = AppWindowAppearance.Resolve(DisplayMode, Opacity, _pointerInside);
+            var state = AppWindowAppearance.Resolve(DisplayMode, Opacity, _hoverWatcher.IsRevealed);
             var result = await ExecuteOperationAsync("opacity", state.TargetOpacity).ConfigureAwait(true);
             if (result.Ok) result = await ExecuteOperationAsync("passthrough", state.TargetPassThrough ? 1 : 0).ConfigureAwait(true);
             if (result.Ok) result = await ExecuteOperationAsync("topmost", Topmost ? 1 : 0).ConfigureAwait(true);
@@ -494,6 +511,8 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
 
     private void HandleOperationFailure(int error, string? detail = null)
     {
+        // 窗口已经不可管理时，先清掉保持状态并卸载全局监听。
+        _hoverWatcher.Stop();
         bool wasElevated = _elevatedSession is not null;
         _elevatedSession?.Dispose();
         _elevatedSession = null;
@@ -521,10 +540,9 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
         else _hoverWatcher.Stop();
     }
 
-    private void OnHoverChanged(bool inside)
+    private void OnHoverChanged(bool shown)
     {
         if (!UsesHover || !IsTargetActive) return;
-        _pointerInside = inside;
         OnPropertyChanged(nameof(OpacityLabel));
         InvalidateAppearance();
     }
@@ -544,8 +562,21 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
         if (IsTargetActive)
         {
             TargetRect = _window.GetRect();
-            if (_window.IsMinimized && MaskVisible) MaskVisible = false;
-            if (_appearanceDirty) _ = ApplyAppearanceAsync();
+            bool minimized = _window.IsMinimized;
+            if (minimized)
+            {
+                if (MaskVisible) MaskVisible = false;
+                // 最小化时完全停止轮询；恢复时由下面的 _wasMinimized 分支重新启动。
+                _hoverWatcher.Stop();
+            }
+            else
+            {
+                // 最小化时监听被停掉；恢复后要重新按当前显示方式启动，否则悬停显示不再工作。
+                if (_wasMinimized) UpdateHoverWatcher();
+                if (_appearanceDirty) _ = ApplyAppearanceAsync();
+            }
+
+            _wasMinimized = minimized;
         }
 
         if (Environment.TickCount64 - _lastRefresh >= 2000) RefreshWindows();
@@ -579,7 +610,7 @@ public sealed class DesktopAppController : INotifyPropertyChanged, IDisposable
         if (_disposed) return;
         _disposed = true;
         _timer.Stop();
-        _hoverWatcher.Stop();
+        _hoverWatcher.Dispose();
         MaskVisible = false;
         _elevatedSession?.Dispose();
         _elevatedSession = null;

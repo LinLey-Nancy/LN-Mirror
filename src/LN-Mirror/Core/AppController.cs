@@ -33,6 +33,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private readonly AppSettings _settings;
     private readonly MirrorWindowController _window = new();
     private readonly MirrorHoverWatcher _hoverWatcher;
+    private readonly GlobalMouseClickWatcher _clickWatcher;
     private readonly Dispatcher _dispatcher;
     private readonly DesktopAppController _apps;
 
@@ -82,9 +83,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         _connectionMode = settings.ConnectionMode;
         _hoverRevealEnabled = settings.HoverRevealEnabled;
 
-        _hoverWatcher = new MirrorHoverWatcher(() => _window.GetContentRect());
+        _clickWatcher = new GlobalMouseClickWatcher(dispatcher);
+        _hoverWatcher = new MirrorHoverWatcher(() => _window.GetContentRect(), clickWatcher: _clickWatcher);
+        _hoverWatcher.KeepEnabled = settings.HoverRevealKeepOnLeave;
         _hoverWatcher.HoverChanged += OnHoverChanged;
-        _apps = new DesktopAppController(settings, dispatcher);
+        _apps = new DesktopAppController(settings, dispatcher, clickWatcher: _clickWatcher);
         ApplyHoverDelay();
 
         foreach (var entry in settings.LanDevices.OrderByDescending(d => d.LastConnectedAt))
@@ -107,7 +110,13 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public DesktopAppController Apps => _apps;
 
+    /// <summary>完整的 ADB 设备快照（已按现有无线别名规则合并），连接与重连都以它为准。</summary>
     public ObservableCollection<AdbDevice> Devices { get; } = new();
+
+    /// <summary>当前连接方式页签下可见的设备，只用于界面展示与选择。</summary>
+    public ObservableCollection<AdbDevice> VisibleDevices { get; } = new();
+
+    private bool _syncingDeviceList;
 
     public IReadOnlyList<QualityProfile> QualityProfiles => QualityProfile.All;
 
@@ -129,8 +138,14 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (!Set(ref _connectionMode, value)) return;
             _settings.ConnectionMode = value;
             SaveSettings();
+            RefreshVisibleDevices();
+            SelectForMode();
             OnPropertyChanged(nameof(IsUsbMode));
             OnPropertyChanged(nameof(IsLanMode));
+            OnPropertyChanged(nameof(CanConnect));
+            OnPropertyChanged(nameof(PhaseHint));
+            OnPropertyChanged(nameof(SelectedDeviceStateText));
+            RefreshPhaseFromDevice();
         }
     }
 
@@ -189,7 +204,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public string PhaseHint => _phase switch
     {
-        ConnectionPhase.NoDevice => "请检查数据线是否为数据线、手机是否开启 USB 调试，并确认已选择驱动正常的设备。",
+        ConnectionPhase.NoDevice => IsLanMode
+            ? "未发现无线设备。请确认手机已开启无线调试，或改用 USB 有线连接。"
+            : "请检查数据线是否为数据线、手机是否开启 USB 调试，并确认已选择驱动正常的设备。",
         ConnectionPhase.Unauthorized => "请解锁手机，在弹出的授权框里勾选“始终允许”并确定。程序不会反复重启连接。",
         ConnectionPhase.Offline => "设备已离线，请重新插拔数据线；仍无反应可重启手机 USB 调试或换一根线。",
         ConnectionPhase.Connecting => "正在启动画面，请稍候…",
@@ -200,7 +217,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public bool IsConnected => _phase == ConnectionPhase.Connected;
 
-    public bool CanConnect => !_isBusy && !IsConnected && _selectedDevice is not null;
+    public bool CanConnect => !_isBusy && !IsConnected && _selectedDevice is not null && MatchesCurrentMode(_selectedDevice);
 
     public bool CanDisconnect => IsBusy || IsConnected || _reconnectCts is { IsCancellationRequested: false };
 
@@ -226,7 +243,14 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         get => _selectedDevice;
         set
         {
-            if (!Set(ref _selectedDevice, value)) return;
+            // 重建可见列表时 WPF 绑定可能先把 SelectedItem 回写成 null；不要把它当成用户取消选择。
+            if (_syncingDeviceList && value is null) return;
+
+            // 这里按引用比较：设备快照会生成值相等的新实例，若按值判断不发通知，
+            // ListBox 的选中项会在列表重建后停在 null，界面看起来像没选中设备。
+            if (ReferenceEquals(_selectedDevice, value)) return;
+            _selectedDevice = value;
+            OnPropertyChanged();
             OnPropertyChanged(nameof(CanConnect));
             OnPropertyChanged(nameof(SelectedDeviceText));
             OnPropertyChanged(nameof(SelectedDeviceStateText));
@@ -236,7 +260,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public string SelectedDeviceText => _selectedDevice?.DisplayName ?? "尚未选择设备";
 
-    public string SelectedDeviceStateText => _selectedDevice?.StateDescription ?? "插入数据线后会自动出现";
+    public string SelectedDeviceStateText => _selectedDevice?.StateDescription
+        ?? (IsLanMode ? "开启无线调试，或选择「添加设备」" : "插入数据线后会自动出现");
 
     public int Opacity
     {
@@ -258,6 +283,20 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     /// <summary>悬停显示模式下，画面是否已显示。</summary>
     public bool HoverRevealActive => _hoverRevealActive;
+
+    /// <summary>悬停显示后，鼠标移开仍保持显示，直到下一次任意鼠标点击。</summary>
+    public bool HoverRevealKeepOnLeave
+    {
+        get => _settings.HoverRevealKeepOnLeave;
+        set
+        {
+            if (_settings.HoverRevealKeepOnLeave == value) return;
+            _settings.HoverRevealKeepOnLeave = value;
+            _hoverWatcher.KeepEnabled = value;
+            SaveSettings();
+            OnPropertyChanged(nameof(HoverRevealKeepOnLeave));
+        }
+    }
 
     public int HoverCustomDelayMs => _settings.HoverCustomDelayMs;
 
@@ -289,8 +328,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         => _hoverWatcher.SetDelay(HoverDelayModes.GetMilliseconds(_settings.HoverDelayMode, HoverCustomDelayMs),
             _settings.HoverDelayMode == HoverDelayModes.Smart);
 
-    /// <summary>不透明度滑块的标题：悬停显示时它决定的是"显示出来时"的不透明度。</summary>
-    public string OpacityLabel => _hoverRevealEnabled ? "悬停显示" : "不透明度";
+    /// <summary>悬浮画面区滑块的标题。</summary>
+    public string OpacityLabel => "透明度调节";
 
     /// <summary>给界面看的当前状态说明。</summary>
     public string OpacityStateText => _hoverRevealEnabled
@@ -322,8 +361,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public string PassThroughText => _passThrough ? "鼠标穿透" : "操控手机";
 
-    /// <summary>工具条上那个开关的文字，直接说明当前处于哪种模式。</summary>
-    public string PassThroughButtonText => _passThrough ? "鼠标穿透" : "操控手机";
+    /// <summary>工具条上那个开关的文字。开关状态由按钮的选中样式表示，文字固定为功能名称。</summary>
+    public string PassThroughButtonText => "鼠标穿透";
 
     /// <summary>工具条上置顶开关的文字。</summary>
     public string TopmostButtonText => $"置顶 {TopmostText}";
@@ -401,7 +440,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public bool MirrorMinimized
     {
         get => _mirrorMinimized;
-        set => Set(ref _mirrorMinimized, value);
+        set
+        {
+            if (!Set(ref _mirrorMinimized, value)) return;
+            if (value) _hoverWatcher.ResetHold();
+        }
     }
 
     public string EngineText => _runtime is null
@@ -463,8 +506,18 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             _settings.Borderless = value;
             SaveSettings();
             OnPropertyChanged(nameof(Borderless));
-            // 运行时直接改窗口样式，改完立刻生效，不用重连
-            if (IsConnected) _window.ApplyBorderless(value);
+            // 运行时直接改窗口样式，改完立刻生效，不用重连；这是手机悬浮画面，不是主窗口。
+            if (IsConnected)
+            {
+                bool ok = _window.ApplyBorderless(value);
+                Notice = ok
+                    ? value ? "已隐藏手机画面的系统边框。" : "已恢复手机画面的系统边框。"
+                    : "更改手机画面边框失败，请查看日志。";
+            }
+            else
+            {
+                Notice = value ? "已设为无边框，连接时生效。" : "已设为系统边框，连接时生效。";
+            }
         }
     }
 
@@ -582,7 +635,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         _hotKeys.HotKeyPressed += OnHotKeyPressed;
         RegisterHotKeys();
 
-        Phase = Devices.Count == 0 ? ConnectionPhase.NoDevice : _phase;
+        Phase = VisibleDevices.Count == 0 ? ConnectionPhase.NoDevice : _phase;
         AppLog.Info("[应用] 初始化完成");
 
         if (AllowAutoReconnect && LanAutoReconnect && _settings.PreferredSerial is { } preferred
@@ -620,7 +673,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     private void ApplyDeviceRows(IReadOnlyList<AdbDevice> devices, IReadOnlyList<MdnsServiceInfo> services)
     {
-        var previous = SelectedDevice;
+        var previous = SelectedDevice?.Serial;
         var display = devices.Where(d => !HasPreferredWirelessAlias(d, devices, services)).ToList();
         if (!Devices.SequenceEqual(display))
         {
@@ -628,17 +681,70 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             foreach (var device in display) Devices.Add(device);
         }
 
-        var preferred = previous?.Serial ?? _settings.PreferredSerial;
-        var selected = Devices.FirstOrDefault(d => d.Serial == preferred);
-        if (selected is null && preferred is not null && AdbDevice.IsWirelessSerial(preferred))
-        {
-            var target = WirelessTarget.FromSerial(preferred, services);
-            selected = target.FindDevice(Devices, target.ResolveAddress(services), preferAddress: false);
-        }
-        SelectedDevice = selected
-            ?? Devices.FirstOrDefault(d => d.IsReady)
-            ?? Devices.FirstOrDefault();
+        RefreshVisibleDevices();
+
+        var preferred = previous ?? _settings.PreferredSerial;
+        SelectedDevice = ResolveVisibleDevice(preferred)
+            ?? VisibleDevices.FirstOrDefault(d => d.IsReady)
+            ?? VisibleDevices.FirstOrDefault();
         if (!IsConnected) RefreshPhaseFromDevice();
+    }
+
+    private bool MatchesCurrentMode(AdbDevice device)
+        => AdbDevice.IsWirelessSerial(device.Serial) == IsLanMode;
+
+    /// <summary>按当前页签刷新可见集合；内容不变时不重建，避免界面闪烁和选择重入。</summary>
+    private void RefreshVisibleDevices()
+    {
+        var visible = Devices.Where(MatchesCurrentMode).ToList();
+        if (VisibleDevices.SequenceEqual(visible)) return;
+
+        _syncingDeviceList = true;
+        try
+        {
+            VisibleDevices.Clear();
+            foreach (var device in visible) VisibleDevices.Add(device);
+        }
+        finally
+        {
+            _syncingDeviceList = false;
+        }
+
+        OnPropertyChanged(nameof(VisibleDevices));
+    }
+
+    /// <summary>切换页签后：能保留就保留，否则选新页签第一个已授权设备；空页签不选。</summary>
+    private void SelectForMode()
+    {
+        var keep = SelectedDevice is { } current
+            ? VisibleDevices.FirstOrDefault(d => d.Serial == current.Serial)
+            : null;
+        SelectedDevice = keep
+            ?? VisibleDevices.FirstOrDefault(d => d.IsReady)
+            ?? VisibleDevices.FirstOrDefault();
+    }
+
+    /// <summary>连接用的设备可能先出现在 monitor 快照里而还没写进界面集合，连接成功后补一次同步。</summary>
+    private void EnsureDeviceListed(AdbDevice device)
+    {
+        if (Devices.Any(d => d.Serial == device.Serial)) return;
+        if (_monitor?.Current is { } current && current.Any(d => d.Serial == device.Serial))
+            ApplyDeviceRows(current, MdnsServices);
+    }
+
+    /// <summary>在可见集合里按串号查找；无线串号仍沿用现有 mDNS 别名解析规则。</summary>
+    private AdbDevice? ResolveVisibleDevice(string? serial)
+    {
+        if (string.IsNullOrWhiteSpace(serial)) return null;
+
+        var direct = VisibleDevices.FirstOrDefault(d => d.Serial == serial);
+        if (direct is not null) return direct;
+        if (!AdbDevice.IsWirelessSerial(serial)) return null;
+
+        var target = WirelessTarget.FromSerial(serial, MdnsServices);
+        var address = target.ResolveAddress(MdnsServices);
+        return target.FindDevice(VisibleDevices, address, preferAddress: false)
+            ?? target.FindDevice(VisibleDevices, address, preferAddress: true);
     }
 
     private static bool HasPreferredWirelessAlias(AdbDevice device, IReadOnlyList<AdbDevice> devices,
@@ -687,10 +793,14 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         // 连接中与已连接时不允许设备轮询把阶段降级（曾导致启动重连瞬间被清回待连接）
         if (IsBusy || IsConnected) return;
 
-        if (_selectedDevice is null)
+        if (_selectedDevice is null
+            || !MatchesCurrentMode(_selectedDevice)
+            || ResolveVisibleDevice(_selectedDevice.Serial) is null)
         {
             Phase = ConnectionPhase.NoDevice;
-            StatusLine = Devices.Count == 0 ? "未发现设备" : "请选择要连接的设备";
+            StatusLine = VisibleDevices.Count == 0
+                ? (IsLanMode ? "未发现无线设备" : "未发现 USB 设备")
+                : "请选择要连接的设备";
             return;
         }
 
@@ -885,7 +995,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         var ready = matchTarget.FindDevice(DeviceSnapshot, address, preferAddress);
         if (ready?.IsReady == true)
         {
-            SelectedDevice = ready;
+            // 只在当前页签确实是无线时更新界面选择；跨页签的后台重连失败时
+            // 不要把不可见的无线设备塞进 USB 页签，列表会看起来没有选中项。
+            if (IsLanMode) SelectedDevice = ready;
             await StartMirrorAsync(ready, ct, target);
             return;
         }
@@ -913,7 +1025,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             return;
         }
         ct.ThrowIfCancellationRequested();
-        SelectedDevice = device;
+        if (IsLanMode) SelectedDevice = device;
         await StartMirrorAsync(device, ct, target);
     }
 
@@ -1160,6 +1272,15 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             return Task.CompletedTask;
         }
 
+        // 开始投屏前再核对一次：防止页签切换或列表刷新后把旧选择拿去发起另一类连接。
+        if (!MatchesCurrentMode(device) || ResolveVisibleDevice(device.Serial) is null)
+        {
+            Notice = IsLanMode
+                ? "请选择「无线」页签中的设备。"
+                : "请选择「USB 有线」页签中的设备。";
+            return Task.CompletedTask;
+        }
+
         return RunConnectionAsync(ct => StartMirrorAsync(device, ct));
     }
 
@@ -1200,23 +1321,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         Phase = ConnectionPhase.Failed;
     }
 
-    private async Task StartMirrorAsync(AdbDevice device, CancellationToken ct, WirelessTarget? target = null)
+    /// <summary>把当前设置和选中设备转换成 scrcpy 启动参数；单独成方法便于验证序列号确实来自所选设备。</summary>
+    private ScrcpyStartOptions BuildStartOptions(AdbDevice device)
     {
-        ct.ThrowIfCancellationRequested();
-        if (!device.IsReady)
-        {
-            Notice = device.StateDescription;
-            return;
-        }
-        if (_runtime is null || _adb is null)
-        {
-            Notice = "内置 scrcpy 引擎不可用，无法连接。";
-            return;
-        }
-
-        StatusLine = Notice = "正在启动画面…";
         var placement = _settings.MirrorPlacement;
-        var options = new ScrcpyStartOptions
+        return new ScrcpyStartOptions
         {
             Serial = device.Serial,
             Quality = _settings.Quality,
@@ -1228,6 +1337,25 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             WindowY = placement is { HasValue: true } p2 ? p2.Y : null,
             WindowWidth = placement is { Width: > 0 } p3 ? p3.Width : null,
         };
+    }
+
+    private async Task StartMirrorAsync(AdbDevice device, CancellationToken ct, WirelessTarget? target = null)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!device.IsReady)
+        {
+            Notice = device.StateDescription;
+            return;
+        }
+
+        if (_runtime is null || _adb is null)
+        {
+            Notice = "内置 scrcpy 引擎不可用，无法连接。";
+            return;
+        }
+
+        StatusLine = Notice = "正在启动画面…";
+        var options = BuildStartOptions(device);
 
         var session = new ScrcpySession(_runtime);
         session.OutputLine += OnScrcpyOutput;
@@ -1243,6 +1371,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 FailConnection($"启动失败：{detail}");
                 return;
             }
+
+            // 会话建立成功后才切页签：失败的自动重连或缺少引擎不应覆盖用户当前的页签偏好。
+            EnsureDeviceListed(device);
+            ConnectionMode = AdbDevice.IsWirelessSerial(device.Serial) ? ConnectionModes.Lan : ConnectionModes.Usb;
+            if (ResolveVisibleDevice(device.Serial) is { } visible) SelectedDevice = visible;
 
             _window.Attach(session.WindowHandle);
             _passThrough = false;
@@ -1489,12 +1622,12 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(OpacityStateText));
     }
 
-    private void OnHoverChanged(bool inside)
+    private void OnHoverChanged(bool shown)
     {
         if (!_hoverRevealEnabled || !IsConnected) return;
-        if (_hoverRevealActive == inside) return;
+        if (_hoverRevealActive == shown) return;
 
-        _hoverRevealActive = inside;
+        _hoverRevealActive = shown;
         ApplyEffectiveOpacity();
         OnPropertyChanged(nameof(HoverRevealActive));
     }
@@ -1533,6 +1666,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         if (!Set(ref _topmost, value, nameof(Topmost))) return;
         OnPropertyChanged(nameof(TopmostText));
+        OnPropertyChanged(nameof(TopmostButtonText));
         _settings.Topmost = value;
         SaveSettings();
         if (IsConnected) _window.ApplyTopmost(value);
@@ -1656,6 +1790,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         await Task.Delay(10).ConfigureAwait(true);
         if (!IsConnected) return;
 
+        // “找回画面”也必须清掉保持状态，否则找回来的画面可能仍处在等待点击关闭的状态。
+        _hoverWatcher.ResetHold();
         if (_window.MoveToVisibleArea())
         {
             Notice = "画面窗口已移回可见显示器。";
@@ -1702,7 +1838,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         try { SavePlacement(); }
         catch (Exception ex) { AppLog.Warn($"[应用] 退出时保存画面位置失败：{ex.Message}"); }
 
-        try { _hoverWatcher.Stop(); }
+        try { _hoverWatcher.Dispose(); }
         catch { /* 忽略 */ }
 
         try
@@ -1719,6 +1855,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         catch { /* 忽略 */ }
 
         try { _apps.Dispose(); }
+        catch { /* 忽略 */ }
+
+        try { _clickWatcher.Dispose(); }
         catch { /* 忽略 */ }
 
         try { _hotKeys?.Dispose(); }
